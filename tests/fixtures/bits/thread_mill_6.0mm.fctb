@@ -1,0 +1,21 @@
+{
+  "attribute": {},
+  "id": "thread_mill_6.0mm",
+  "name": "Thread Mill 6.0mm (Pitch 1.25mm)",
+  "parameter": {
+    "Chipload": "0.00 mm",
+    "Crest": "0.10 mm",
+    "Diameter": "6.00 mm",
+    "Flutes": 0,
+    "Length": "60.00 mm",
+    "Material": "HSS",
+    "NeckDiameter": "4.10 mm",
+    "NeckLength": "20.00 mm",
+    "ShankDiameter": "6.00 mm",
+    "SpindleDirection": "Forward",
+    "cuttingAngle": "60.00\u00b0"
+  },
+  "shape": "thread-mill.fcstd",
+  "shape-type": "ThreadMill",
+  "version": 2
+}

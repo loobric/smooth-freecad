@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "label": "Test Library",
+  "tools": [
+    {"nr": 1, "path": "test_drill_5mm.fctb"},
+    {"nr": 2, "path": "test_endmill_6mm.fctb"},
+    {"nr": 3, "path": "test_vbit_60deg.fctb"}
+  ]
+}

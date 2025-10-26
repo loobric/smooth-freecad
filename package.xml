@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+<package format="1" xmlns="https://wiki.freecad.org/Package_Metadata">
+  <name>Smooth</name>
+  <description>Synchronize FreeCAD tool libraries with Smooth tool data exchange system</description>
+  <version>0.1.0</version>
+  <date>2025-01-24</date>
+  <maintainer email="sliptonic@gmail.com">Brad Collette</maintainer>
+  <license file="LICENSE">MIT</license>
+  <url type="repository" branch="main">https://github.com/sliptonic/smooth</url>
+  <url type="readme">https://github.com/sliptonic/smooth/blob/main/clients/freecad/README.md</url>
+  
+  <content>
+    <workbench>
+      <classname>Smooth</classname>
+      <subdirectory>./</subdirectory>
+    </workbench>
+  </content>
+
+  <depend optional="false" version_gte="0.21">FreeCAD</depend>
+  
+  <description>
+    The Smooth addon provides bidirectional synchronization between FreeCAD's CAM tool 
+    libraries and the Smooth tool data exchange system.
+    
+    This addon adds a "Sync with Smooth" button to the CAM workbench toolbar and 
+    a preference page to FreeCAD settings for server configuration.
+    
+    Features:
+    - Bidirectional sync: Import and export tools in one operation
+    - Bulk operations: Efficiently sync entire tool libraries
+    - FreeCAD Path integration: Works directly within CAM workflow
+    - Preserves tool metadata and parameters
+    - API key authentication support
+    
+    Requirements:
+    - FreeCAD 0.21 or later with CAM (Path) workbench
+    - Access to a Smooth server instance
+    - Network connectivity for API access
+    - Python requests library (usually included with FreeCAD)
+  </description>
+  
+  <tags>
+    <tag>CAM</tag>
+    <tag>Tools</tag>
+    <tag>Synchronization</tag>
+  </tags>
+</package>

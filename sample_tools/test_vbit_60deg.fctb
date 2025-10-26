@@ -1,0 +1,16 @@
+{
+  "version": 2,
+  "id": "test-vbit-60",
+  "name": "60° V-Bit",
+  "shape": "v-bit.fcstd",
+  "shape-type": "VBit",
+  "parameter": {
+    "Diameter": "12.70 mm",
+    "Length": "50.00 mm",
+    "CuttingEdgeAngle": "60.00°",
+    "CuttingEdgeHeight": "10.00 mm",
+    "ShankDiameter": "6.35 mm",
+    "Material": "Carbide"
+  },
+  "attribute": {}
+}

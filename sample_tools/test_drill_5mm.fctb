@@ -1,0 +1,14 @@
+{
+  "version": 2,
+  "id": "test-drill-5mm",
+  "name": "5mm Test Drill",
+  "shape": "drill.fcstd",
+  "shape-type": "Drill",
+  "parameter": {
+    "Diameter": "5.00 mm",
+    "Length": "50.00 mm",
+    "TipAngle": "118.00°",
+    "Material": "HSS"
+  },
+  "attribute": {}
+}

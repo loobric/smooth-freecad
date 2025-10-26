@@ -1,0 +1,17 @@
+{
+  "attribute": {},
+  "id": "drill_5.0mm",
+  "name": "Drill 5.0mm",
+  "parameter": {
+    "Chipload": "0.00 mm",
+    "Diameter": "5.00 mm",
+    "Flutes": 0,
+    "Length": "85.00 mm",
+    "Material": "HSS",
+    "SpindleDirection": "Forward",
+    "TipAngle": "119.00\u00b0"
+  },
+  "shape": "drill.fcstd",
+  "shape-type": "Drill",
+  "version": 2
+}

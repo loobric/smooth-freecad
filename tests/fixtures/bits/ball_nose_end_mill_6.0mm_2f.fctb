@@ -1,0 +1,18 @@
+{
+  "attribute": {},
+  "id": "ball_nose_end_mill_6.0mm_2f",
+  "name": "Ball Nose End Mill 6.0mm 2F",
+  "parameter": {
+    "Chipload": "0.00 mm",
+    "CuttingEdgeHeight": "10.00 mm",
+    "Diameter": "6.00 mm",
+    "Flutes": 2,
+    "Length": "50.00 mm",
+    "Material": "HSS",
+    "ShankDiameter": "6.00 mm",
+    "SpindleDirection": "Forward"
+  },
+  "shape": "ballend.fcstd",
+  "shape-type": "Ballend",
+  "version": 2
+}

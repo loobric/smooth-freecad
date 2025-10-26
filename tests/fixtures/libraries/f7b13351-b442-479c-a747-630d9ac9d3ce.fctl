@@ -1,0 +1,470 @@
+{
+  "label": "default",
+  "tools": [
+    {
+      "nr": 113,
+      "path": "ball_nose_end_mill_10.0mm_2f.fctb"
+    },
+    {
+      "nr": 16,
+      "path": "ball_nose_end_mill_2.0mm_2f.fctb"
+    },
+    {
+      "nr": 68,
+      "path": "ball_nose_end_mill_3.0mm_2f.fctb"
+    },
+    {
+      "nr": 17,
+      "path": "ball_nose_end_mill_3.175mm_2f.fctb"
+    },
+    {
+      "nr": 69,
+      "path": "ball_nose_end_mill_4.0mm_2f.fctb"
+    },
+    {
+      "nr": 70,
+      "path": "ball_nose_end_mill_5.0mm_2f.fctb"
+    },
+    {
+      "nr": 18,
+      "path": "ball_nose_end_mill_6.0mm_2f.fctb"
+    },
+    {
+      "nr": 112,
+      "path": "ball_nose_end_mill_8.0mm_2f.fctb"
+    },
+    {
+      "nr": 54,
+      "path": "center_drill_1.0mm.fctb"
+    },
+    {
+      "nr": 55,
+      "path": "center_drill_1.6mm.fctb"
+    },
+    {
+      "nr": 56,
+      "path": "center_drill_2.0mm.fctb"
+    },
+    {
+      "nr": 57,
+      "path": "center_drill_2.5mm.fctb"
+    },
+    {
+      "nr": 58,
+      "path": "center_drill_3.15mm.fctb"
+    },
+    {
+      "nr": 15,
+      "path": "chamfer_mill_10.0mm_45deg.fctb"
+    },
+    {
+      "nr": 63,
+      "path": "chamfer_mill_12.0mm_45deg.fctb"
+    },
+    {
+      "nr": 101,
+      "path": "chamfer_mill_3.0mm_45deg.fctb"
+    },
+    {
+      "nr": 102,
+      "path": "chamfer_mill_4.0mm_45deg.fctb"
+    },
+    {
+      "nr": 14,
+      "path": "chamfer_mill_6.0mm_45deg.fctb"
+    },
+    {
+      "nr": 95,
+      "path": "corner_rounding_mill_10.0mm_radius_4.0mm.fctb"
+    },
+    {
+      "nr": 109,
+      "path": "corner_rounding_mill_24.0mm_radius_8.0mm.fctb"
+    },
+    {
+      "nr": 66,
+      "path": "corner_rounding_mill_28.7mm_radius_8.0mm.fctb"
+    },
+    {
+      "nr": 92,
+      "path": "corner_rounding_mill_4.0mm_radius_1.0mm.fctb"
+    },
+    {
+      "nr": 93,
+      "path": "corner_rounding_mill_6.0mm_radius_2.0mm.fctb"
+    },
+    {
+      "nr": 94,
+      "path": "corner_rounding_mill_8.0mm_radius_3.0mm.fctb"
+    },
+    {
+      "nr": 21,
+      "path": "drill_0.2mm.fctb"
+    },
+    {
+      "nr": 22,
+      "path": "drill_0.3mm.fctb"
+    },
+    {
+      "nr": 23,
+      "path": "drill_0.4mm.fctb"
+    },
+    {
+      "nr": 24,
+      "path": "drill_0.5mm.fctb"
+    },
+    {
+      "nr": 25,
+      "path": "drill_0.8mm.fctb"
+    },
+    {
+      "nr": 26,
+      "path": "drill_1.0mm.fctb"
+    },
+    {
+      "nr": 27,
+      "path": "drill_1.2mm.fctb"
+    },
+    {
+      "nr": 28,
+      "path": "drill_1.5mm.fctb"
+    },
+    {
+      "nr": 29,
+      "path": "drill_2.0mm.fctb"
+    },
+    {
+      "nr": 30,
+      "path": "drill_2.5mm.fctb"
+    },
+    {
+      "nr": 31,
+      "path": "drill_3.0mm.fctb"
+    },
+    {
+      "nr": 32,
+      "path": "drill_3.3mm.fctb"
+    },
+    {
+      "nr": 33,
+      "path": "drill_3.5mm.fctb"
+    },
+    {
+      "nr": 64,
+      "path": "drill_3.6mm.fctb"
+    },
+    {
+      "nr": 65,
+      "path": "drill_3.8mm.fctb"
+    },
+    {
+      "nr": 110,
+      "path": "drill_3.9mm.fctb"
+    },
+    {
+      "nr": 34,
+      "path": "drill_4.0mm.fctb"
+    },
+    {
+      "nr": 35,
+      "path": "drill_4.2mm.fctb"
+    },
+    {
+      "nr": 36,
+      "path": "drill_4.5mm.fctb"
+    },
+    {
+      "nr": 71,
+      "path": "drill_4.8mm.fctb"
+    },
+    {
+      "nr": 100,
+      "path": "drill_4.9mm.fctb"
+    },
+    {
+      "nr": 37,
+      "path": "drill_5.0mm.fctb"
+    },
+    {
+      "nr": 97,
+      "path": "drill_5.1mm.fctb"
+    },
+    {
+      "nr": 38,
+      "path": "drill_5.5mm.fctb"
+    },
+    {
+      "nr": 72,
+      "path": "drill_5.8mm.fctb"
+    },
+    {
+      "nr": 39,
+      "path": "drill_6.0mm.fctb"
+    },
+    {
+      "nr": 98,
+      "path": "drill_6.4mm.fctb"
+    },
+    {
+      "nr": 40,
+      "path": "drill_6.5mm.fctb"
+    },
+    {
+      "nr": 99,
+      "path": "drill_6.6mm.fctb"
+    },
+    {
+      "nr": 41,
+      "path": "drill_6.8mm.fctb"
+    },
+    {
+      "nr": 42,
+      "path": "drill_7.0mm.fctb"
+    },
+    {
+      "nr": 43,
+      "path": "drill_7.5mm.fctb"
+    },
+    {
+      "nr": 44,
+      "path": "drill_8.0mm.fctb"
+    },
+    {
+      "nr": 1,
+      "path": "end_mill_0.8mm_2f.fctb"
+    },
+    {
+      "nr": 62,
+      "path": "end_mill_10.0mm_2f.fctb"
+    },
+    {
+      "nr": 2,
+      "path": "end_mill_2.0mm_1f.fctb"
+    },
+    {
+      "nr": 3,
+      "path": "end_mill_2.0mm_2f.fctb"
+    },
+    {
+      "nr": 4,
+      "path": "end_mill_3.0mm_1f.fctb"
+    },
+    {
+      "nr": 5,
+      "path": "end_mill_3.0mm_2f.fctb"
+    },
+    {
+      "nr": 6,
+      "path": "end_mill_3.175mm_1f.fctb"
+    },
+    {
+      "nr": 7,
+      "path": "end_mill_3.175mm_2f.fctb"
+    },
+    {
+      "nr": 96,
+      "path": "end_mill_3.175mm_2f_compression.fctb"
+    },
+    {
+      "nr": 8,
+      "path": "end_mill_3.175mm_4f.fctb"
+    },
+    {
+      "nr": 9,
+      "path": "end_mill_4.0mm_1f.fctb"
+    },
+    {
+      "nr": 10,
+      "path": "end_mill_6.0mm_1f.fctb"
+    },
+    {
+      "nr": 114,
+      "path": "end_mill_6.0mm_1f_long.fctb"
+    },
+    {
+      "nr": 11,
+      "path": "end_mill_6.0mm_2f.fctb"
+    },
+    {
+      "nr": 91,
+      "path": "end_mill_6.0mm_2f_compression.fctb"
+    },
+    {
+      "nr": 90,
+      "path": "end_mill_6.0mm_2f_down_cut.fctb"
+    },
+    {
+      "nr": 12,
+      "path": "end_mill_6.0mm_2f_long.fctb"
+    },
+    {
+      "nr": 111,
+      "path": "end_mill_6.0mm_3f.fctb"
+    },
+    {
+      "nr": 13,
+      "path": "end_mill_6.0mm_4f.fctb"
+    },
+    {
+      "nr": 67,
+      "path": "end_mill_6.0mm_4f_corner_radius_0.5mm.fctb"
+    },
+    {
+      "nr": 87,
+      "path": "electric_contact_sensor_4.0mm.fctb"
+    },
+    {
+      "nr": 81,
+      "path": "reamer_10.0mm_h7.fctb"
+    },
+    {
+      "nr": 73,
+      "path": "reamer_2.0mm_h7.fctb"
+    },
+    {
+      "nr": 74,
+      "path": "reamer_3.0mm_h7.fctb"
+    },
+    {
+      "nr": 103,
+      "path": "reamer_4.0mm_f5.fctb"
+    },
+    {
+      "nr": 75,
+      "path": "reamer_4.0mm_h7.fctb"
+    },
+    {
+      "nr": 82,
+      "path": "reamer_4.0mm_s7.fctb"
+    },
+    {
+      "nr": 105,
+      "path": "reamer_5.0mm_e5.fctb"
+    },
+    {
+      "nr": 106,
+      "path": "reamer_5.0mm_f5.fctb"
+    },
+    {
+      "nr": 76,
+      "path": "reamer_5.0mm_h7.fctb"
+    },
+    {
+      "nr": 104,
+      "path": "reamer_5.0mm_h8.fctb"
+    },
+    {
+      "nr": 85,
+      "path": "reamer_5.0mm_j7.fctb"
+    },
+    {
+      "nr": 86,
+      "path": "reamer_5.0mm_n7.fctb"
+    },
+    {
+      "nr": 83,
+      "path": "reamer_5.0mm_s7.fctb"
+    },
+    {
+      "nr": 77,
+      "path": "reamer_6.0mm_h7.fctb"
+    },
+    {
+      "nr": 84,
+      "path": "reamer_6.0mm_s7.fctb"
+    },
+    {
+      "nr": 78,
+      "path": "reamer_7.0mm_h7.fctb"
+    },
+    {
+      "nr": 79,
+      "path": "reamer_8.0mm_h7.fctb"
+    },
+    {
+      "nr": 80,
+      "path": "reamer_9.0mm_h7.fctb"
+    },
+    {
+      "nr": 60,
+      "path": "reverse_chamfer_mill_6mm_45deg.fctb"
+    },
+    {
+      "nr": 61,
+      "path": "reverse_chamfer_mill_6mm_60deg.fctb"
+    },
+    {
+      "nr": 59,
+      "path": "spotting_drill_6.0mm_120deg.fctb"
+    },
+    {
+      "nr": 89,
+      "path": "surfacing_bit_10.0mm_1f.fctb"
+    },
+    {
+      "nr": 108,
+      "path": "surfacing_bit_20.0mm_2f.fctb"
+    },
+    {
+      "nr": 19,
+      "path": "surfacing_bit_25.4mm_3f.fctb"
+    },
+    {
+      "nr": 20,
+      "path": "surfacing_bit_60.0mm_3f.fctb"
+    },
+    {
+      "nr": 48,
+      "path": "thread_mill_2.35mm.fctb"
+    },
+    {
+      "nr": 49,
+      "path": "thread_mill_3.15mm.fctb"
+    },
+    {
+      "nr": 50,
+      "path": "thread_mill_3.9mm.fctb"
+    },
+    {
+      "nr": 51,
+      "path": "thread_mill_4.8mm.fctb"
+    },
+    {
+      "nr": 52,
+      "path": "thread_mill_6.0mm.fctb"
+    },
+    {
+      "nr": 53,
+      "path": "thread_mill_7.7mm.fctb"
+    },
+    {
+      "nr": 45,
+      "path": "v_bit_0.2mm_20deg.fctb"
+    },
+    {
+      "nr": 46,
+      "path": "v_bit_0.3mm_20deg.fctb"
+    },
+    {
+      "nr": 115,
+      "path": "end_mill_6.0mm_4f_roughing.fctb"
+    },
+    {
+      "nr": 116,
+      "path": "sharpie_2.0mm.fctb"
+    },
+    {
+      "nr": 117,
+      "path": "end_mill_6.0mm_3f_long.fctb"
+    },
+    {
+      "nr": 118,
+      "path": "drill_4.1mm.fctb"
+    },
+    {
+      "nr": 119,
+      "path": "taster_sensor_4.0mm_workaround.fctb"
+    }
+  ],
+  "version": 1
+}

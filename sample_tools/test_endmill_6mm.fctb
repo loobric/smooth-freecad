@@ -1,0 +1,16 @@
+{
+  "version": 2,
+  "id": "test-endmill-6mm",
+  "name": "6mm Endmill",
+  "shape": "endmill.fcstd",
+  "shape-type": "Endmill",
+  "parameter": {
+    "Diameter": "6.00 mm",
+    "Length": "60.00 mm",
+    "CuttingEdgeHeight": "20.00 mm",
+    "ShankDiameter": "6.00 mm",
+    "Flutes": "2",
+    "Material": "Carbide"
+  },
+  "attribute": {}
+}
