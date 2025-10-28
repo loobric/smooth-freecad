@@ -1,4 +1,4 @@
-# ![Smooth Logo](Resources/icons/smooth-icon.svg) Smooth - Tool Library Synchronization for FreeCAD
+# ![Smooth Logo](Resources/icons/Smooth.svg) Smooth - Tool Library Synchronization for FreeCAD
 
 <p align="center">
   <img src="https://img.shields.io/badge/FreeCAD-0.21+-blue.svg" alt="FreeCAD Version">
