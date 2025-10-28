@@ -106,7 +106,7 @@ def initialize():
                 toolbars = mw.findChildren(QtGui.QToolBar)
                 target_toolbar = None
                 for toolbar in toolbars:
-                    if toolbar.windowTitle() == "Helpful Tools":
+                    if toolbar.windowTitle() == "Tool Commands":
                         target_toolbar = toolbar
                         break
                 
@@ -119,7 +119,6 @@ def initialize():
                             cam_toolbar_added[0] = True
                             return
                     
-                    target_toolbar.addSeparator()
                     target_toolbar.addAction(smooth_action)
                     App.Console.PrintMessage("✓ Smooth Sync added to CAM Helpful Tools toolbar\n")
                     cam_toolbar_added[0] = True
