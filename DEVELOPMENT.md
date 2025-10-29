@@ -2,26 +2,6 @@
 
 This document contains development information specific to **smooth-freecad** - the FreeCAD CAM workbench integration for Smooth tool synchronization.
 
-## Design Philosophy
-
-### Application-Agnostic Core
-
-Smooth is designed with a strict separation between **core** and **clients**:
-
-**Core (`smooth-core`)**: Application-agnostic REST API and data management
-- No application-specific logic (no FreeCAD, LinuxCNC, etc.)
-- Provides universal REST API endpoints
-- Handles authentication, authorization, audit logging
-- Manages canonical database schema
-- Implements change detection and synchronization primitives
-
-**Clients (`smooth-freecad`, `smooth-linuxcnc`, `smooth-web`)**: Reference implementations
-- Each client is a separate repository
-- Clients consume the core REST API
-- Handle format translation and application-specific logic
-- Serve as reference implementations for community integrations
-- Can evolve independently from the core
-
 # AI PROMPT
 
 AI agents working on **any** Smooth repository should incorporate the following prompts into their responses:
@@ -43,16 +23,6 @@ The FreeCAD integration provides:
 - FreeCAD addon with GUI for sync operations
 - Shape file handling for custom tool geometries
 - Conflict detection and version management
-
-## Architecture
-
-The FreeCAD client uses **client-side format conversion**:
-- Parses FreeCAD tool files locally
-- Converts to Smooth's generic data model (ToolItem, ToolPreset, ToolSet)
-- Uploads via generic Smooth API endpoints
-- Downloads from Smooth and converts back to FreeCAD format
-
-This keeps the Smooth core application-agnostic.
 
 ## Components
 
@@ -103,106 +73,17 @@ Manages FreeCAD shape files (.FCStd, STEP, STL, etc.).
 - Path resolution across directories
 - Skips built-in FreeCAD shapes
 
-### FreeCAD Addon
-
-#### 4. Addon Integration (`InitGui.py`)
-Initializes the addon and integrates with FreeCAD.
-
-**Features:**
-- No separate workbench - injects into CAM workbench
-- Preference page in Edit → Preferences → CAM → Smooth
-- Sync button in CAM toolbar
-- Uses QTimer for deferred button injection
-
-#### 5. Sync Dialog (`SmoothDialog.py`)
-GUI for synchronization operations.
-
-**Features:**
-- Three sync modes:
-  - Export new tools to Smooth
-  - Import new tools from Smooth
-  - Update modified tools (future)
-- Progress indication
-- Summary of operations
-- Error reporting
-
-**Conflict Detection:**
-- Checks ToolSet versions before export
-- Warns if server has newer version
-- Three resolution options:
-  - Force push (overwrite server)
-  - Choose version to restore
-  - Cancel operation
-- Pull functionality to download server versions
-
-#### 6. Version Selector Dialog
-Choose specific versions when conflicts detected.
-
-**Features:**
-- Dropdown of all versions with timestamps
-- Change summaries displayed
-- Option to restore any version or pull latest
-- Automatic library reload after pull
-
-#### 7. Preferences Page (`SmoothPreferences.py`)
-Configuration UI in FreeCAD settings.
-
-**Settings:**
-- Smooth API URL
-- API key (optional)
-- Auto-sync enable/disable
-- Test connection button
-
-## Development Status
-
-### Completed Features ✅
-- [x] Parse .fctb (tool bit) files (14 tests)
-- [x] Parse .fctl (library) files (13 tests)
-- [x] Export Smooth → FreeCAD .fctb (14 tests)
-- [x] Export Smooth → FreeCAD .fctl (12 tests)
-- [x] Map FreeCAD shapes to Smooth geometry
-- [x] Round-trip validation (both formats)
-- [x] Shape file upload/download/verification
-- [x] FreeCAD addon UI integration
-- [x] Sync dialog with bulk operations
-- [x] Preference page for settings
-- [x] Conflict detection and warnings
-- [x] Version selector for resolution
-- [x] Pull functionality from server
-
 **Total Test Coverage: 53/53 tests passing**
 
 ### Future Enhancements
+- [ ] Change Notification
+- [ ] Improved UI
 - [ ] Incremental sync (only changed tools)
 - [ ] Auto-sync on library changes
-- [ ] Offline queue for sync operations
 - [ ] Tool usage tracking integration
 - [ ] Advanced conflict resolution (merge)
 
 ## File Locations
-
-### FreeCAD Tool Data Paths
-
-The addon uses FreeCAD's API to automatically discover tool data locations:
-
-```python
-from Path import Preferences
-asset_path = Path(Preferences.getAssetPath())
-```
-
-This returns the correct path including version string (e.g., `~/.local/share/FreeCAD/v1-1/CamAssets/` or `~/.local/share/FreeCAD/v0-21/CamAssets/`).
-
-Tool data is organized under the asset path:
-- **Tool bits**: `{asset_path}/Tools/Bit/`
-- **Libraries**: `{asset_path}/Tools/Library/`
-- **Shapes**: `{asset_path}/Tools/Shape/`
-
-**Note:** The addon never hardcodes version strings. It relies on `Path.Preferences.getAssetPath()` to handle version differences automatically.
-
-### Addon Configuration
-
-Configuration stored in:
-- `~/.config/smooth/freecad.json`
 
 ## Testing
 
@@ -239,43 +120,6 @@ python fctl_parser.py sample_tools/test_library.fctl
 - Switch to CAM workbench
 - Look for "Sync with Smooth" button
 - Click and test sync operations
-
-### Sample Data
-
-Sample files for testing:
-- `sample_tools/test_drill_5mm.fctb` - 5mm drill bit
-- `sample_tools/test_endmill_6mm.fctb` - 6mm endmill
-- `sample_tools/test_library.fctl` - Sample library with multiple tools
-
-## Installation
-
-### Development Installation (Symlink)
-```bash
-# Link to FreeCAD Mod directory for live development
-ln -s /path/to/smooth-freecad ~/.local/share/FreeCAD/Mod/Smooth
-```
-
-### Manual Installation
-```bash
-# Copy files to FreeCAD Mod directory
-mkdir -p ~/.local/share/FreeCAD/Mod/Smooth
-cp -r /path/to/smooth-freecad/* ~/.local/share/FreeCAD/Mod/Smooth/
-```
-
-### FreeCAD Addon Manager (Future)
-Once published:
-- Tools → Addon Manager → Smooth → Install
-
-## Configuration
-
-Edit `~/.config/smooth/freecad.json`:
-```json
-{
-  "api_url": "http://localhost:8000",
-  "api_key": "your-api-key-here",
-  "auto_sync": false
-}
-```
 
 ## Project Structure
 

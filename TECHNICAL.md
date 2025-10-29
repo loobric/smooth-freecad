@@ -1,179 +1,55 @@
 # Smooth FreeCAD Integration
 
-> Bidirectional tool data synchronization between FreeCAD CAM workbench and Smooth tool management system.
+## Concept Map
+| FreeCAD Concept | Smooth Concept | Description | Notes |
+|-----------------|----------------|-------------|-------|
+| **Tool Bit (.fctb)** | **ToolItem** | Represents a physical cutting tool with specific geometry and properties | - FreeCAD stores as JSON files with shape-specific parameters<br>- Smooth uses a unified ToolItem with tool_type and geometry fields |
+| **Tool Library (.fctl)** | **ToolSet** | Collection of tools with additional metadata | - FreeCAD libraries reference tool bits by file path<br>- Smooth ToolSets contain direct references to ToolItems |
+| **Tool Number** | **ToolPreset** | Machine-specific tool assignment | - FreeCAD stores this in the library file<br>- Smooth separates machine-specific data into ToolPresets |
+| **Shape Type** | **tool_type** | Classification of the tool | - FreeCAD has shape types like "endmill", "drill", etc.<br>- Smooth uses a standardized enum for tool types |
+| **Tool Parameters** | **geometry** | Dimensional and geometric properties | - FreeCAD parameters are shape-specific<br>- Smooth normalizes common parameters in a standard structure |
+| **Material** | **material** | Tool material properties | - FreeCAD stores as string (e.g., "HSS", "Carbide")<br>- Smooth uses a structured material object |
+| **Vendor** | **manufacturer** | Tool manufacturer information | - FreeCAD may include in description<br>- Smooth has dedicated manufacturer fields |
+| **Tool Holder** | **ToolAssembly** | Combination of holder and insert | - FreeCAD handles this implicitly<br>- Smooth models it explicitly as a separate entity |
+| **Tool Table** | **ToolPreset** | Machine-specific tool configuration | - FreeCAD tool libraries can function as tool tables<br>- Smooth uses ToolPresets for machine-specific configs |
+| **Shape File** | **geometry.shape** | 3D model of the tool | - FreeCAD uses .FCStd, STEP, or STL files<br>- Smooth references shape files in geometry data |
+| **Tool Length** | **geometry.overall_length** | Total length of the tool | - Handled consistently in both systems<br>- Smooth includes units explicitly |
+| **Cutting Diameter** | **geometry.cutting_diameter** | Effective cutting diameter | - Core parameter in both systems<br>- Smooth enforces unit consistency |
+| **Flute Length** | **geometry.cutting_length** | Length of cutting edges | - Common parameter for end mills and drills<br>- Smooth uses more generic field names |
+| **Shank Diameter** | **geometry.shank_diameter** | Diameter of tool shank | - Important for tool holder compatibility<br>- Smooth includes in geometry object |
+| **Tool Description** | **description** | Human-readable tool description | - FreeCAD often includes specs in description<br>- Smooth separates specs into structured fields |
+| **Tool Label** | **name** | Display name of the tool | - FreeCAD uses filename or internal name<br>- Smooth enforces unique naming |
+| **Version** | **version** | Revision tracking | - FreeCAD may track in filename<br>- Smooth uses explicit version field for concurrency |
+| **Tool Path** | **id** | Unique identifier | - FreeCAD uses file paths<br>- Smooth uses UUIDs |
+| **Tool Library Path** | **ToolSet.id** | Reference to tool collection | - FreeCAD uses filesystem paths<br>- Smooth uses UUID references |
+| **Tool Life** | **ToolUsage** | Usage tracking | - Basic in FreeCAD<br>- Comprehensive in Smooth with tracking and prediction |
 
-## What is smooth-freecad?
 
-A FreeCAD addon that synchronizes tool data between FreeCAD's CAM workbench and a Smooth server, providing:
-- **Import tools from Smooth** - Download tool libraries to FreeCAD
-- **Export tools to Smooth** - Upload FreeCAD tools to centralized database
-- **Conflict detection** - Warns before overwriting newer versions
-- **Version management** - View history, restore previous versions, pull from server
-- **Shape file sync** - Upload/download custom tool geometries
-- **Bulk operations** - Efficient sync of entire tool libraries
+* Smooth Assemblies are unused by FreeCAD
+* Smooth Instances are unused by FreeCAD
 
-## Features
+## Key Differences
 
-- Single "Sync with Smooth" button in CAM workbench toolbar
-- Preference page in FreeCAD settings (Edit → Preferences → CAM → Smooth)
-- Parses `.fctb` (tool bit) and `.fctl` (tool library) files
-- Round-trip conversion tested (FreeCAD ↔ Smooth ↔ FreeCAD)
-- No separate workbench required - integrates seamlessly with CAM workflow
+1. **Data Organization**:
+   - FreeCAD: File-based with loose coupling between tools and libraries
+   - Smooth: Database-backed with explicit relationships
+   - FreeCAD doesn't support assemblies yet.
 
-## Installation
+2. **Extensibility**:
+   - FreeCAD: Shape-based with fixed parameter sets per shape
+   - Smooth: Flexible schema with tool_type-specific validation
 
-### Option 1: FreeCAD Addon Manager (Future)
-Once published:
-1. Open FreeCAD
-2. Go to Tools → Addon Manager
-3. Search for "Smooth"
-4. Click Install
+3. **Multi-Machine Support**:
+   - FreeCAD: Single machine configuration per library
+   - Smooth: Multiple machine configurations through ToolPresets
 
-### Option 2: Manual Installation
-```bash
-# Create FreeCAD Mod directory if it doesn't exist
-mkdir -p ~/.local/share/FreeCAD/Mod/Smooth
+4. **Versioning**:
+   - FreeCAD: Manual versioning through filenames
+   - Smooth: Built-in version tracking and conflict resolution
 
-# Copy addon files
-cp -r /path/to/smooth-freecad/* ~/.local/share/FreeCAD/Mod/Smooth/
-```
-
-### Option 3: Symlink (for Development)
-```bash
-ln -s /path/to/smooth-freecad ~/.local/share/FreeCAD/Mod/Smooth
-```
-
-**Restart FreeCAD** after installation.
-
-## Quick Start
-
-### 1. Configure Connection
-
-1. Open FreeCAD
-2. Go to Edit → Preferences → CAM → Smooth
-3. Enter your Smooth server URL (e.g., `http://localhost:8000`)
-4. (Optional) Enter API key if authentication is enabled
-5. Click "Test Connection" to verify
-6. Click "Apply" to save
-
-Configuration is stored in `~/.config/smooth/freecad.json`.
-
-### 2. Sync Tools
-
-1. Switch to **CAM workbench** in FreeCAD
-2. Click the **"Sync with Smooth"** button in toolbar (or press Ctrl+Shift+S)
-3. Choose sync operation:
-   - **Export new tools to Smooth** - Send FreeCAD tools to server
-   - **Import new tools from Smooth** - Receive tools from server
-   - **Update modified tools** (future feature)
-4. Click "Start Sync"
-5. Monitor progress in dialog
-6. Review summary of operations
-
-### 3. Handle Conflicts
-
-If the server has a newer version than your local library:
-1. **Conflict warning dialog** appears with options:
-   - **YES** - Force push (overwrite server with your version)
-   - **NO** - Choose which version to restore
-   - **CANCEL** - Abort export
-2. If choosing version, **version selector** shows all versions with:
-   - Timestamps
-   - Change summaries
-   - Option to restore any version or pull latest
-3. After pulling server version, local `.fctl` files update automatically
-
-## File Locations
-
-FreeCAD stores tool data in:
-```
-~/.local/share/FreeCAD/v1-1/CamAssets/Tools/
-├── Bit/       # Tool bit files (.fctb)
-├── Library/   # Tool library files (.fctl)
-└── Shape/     # Custom shape files (.FCStd, STEP, STL, etc.)
-```
-
-## How It Works
-
-### FreeCAD → Smooth
-
-1. **Parse** - Read `.fctb` (tool bits) and `.fctl` (tool libraries)
-2. **Convert** - Transform to Smooth data model:
-   - Tool bits → `ToolItem` entities
-   - Tool libraries → `ToolSet` entities with `ToolPreset` members
-3. **Upload** - Send to Smooth via REST API
-4. **Sync shapes** - Upload custom shape files (built-in shapes skipped)
-
-### Smooth → FreeCAD
-
-1. **Download** - Fetch `ToolSet` and associated `ToolItem` entities
-2. **Convert** - Transform to FreeCAD format:
-   - `ToolItem` → `.fctb` files
-   - `ToolSet` → `.fctl` files
-3. **Write** - Save to FreeCAD directories
-4. **Sync shapes** - Download custom shape files
-5. **Reload** - Update FreeCAD library list
-
-### Data Preservation
-
-Round-trip conversion is fully tested:
-- Units preserved ("5.00 mm", "60.00°")
-- Parameter names converted (snake_case ↔ CamelCase)
-- Shape references maintained
-- Comments and metadata retained
-
-## Requirements
-
-- **FreeCAD** 0.21 or later
-- **Python requests** library (usually included with FreeCAD)
-- **Smooth server** running and accessible
-
-## Architecture
-
-```
-FreeCAD CAM Workbench
-       │
-       ├─ Tool Bits (.fctb files)
-       ├─ Tool Libraries (.fctl files)
-       └─ Shape Files (.FCStd, etc.)
-              │
-              ▼
-    ┌─────────────────────┐
-    │  Smooth FreeCAD     │
-    │  (Client-side)      │
-    │  • Parse formats    │
-    │  • Convert data     │
-    │  • Sync via API     │
-    └─────────────────────┘
-              │
-              ▼ REST API
-    ┌─────────────────────┐
-    │   Smooth Core       │
-    │   (Server)          │
-    │   • ToolItem        │
-    │   • ToolSet         │
-    │   • ToolPreset      │
-    └─────────────────────┘
-```
-
-**Client-side conversion** keeps Smooth Core application-agnostic.
-
-## Configuration
-
-Edit `~/.config/smooth/freecad.json`:
-```json
-{
-  "api_url": "http://localhost:8000",
-  "api_key": "your-api-key-here",
-  "auto_sync": false
-}
-```
-
-**Settings:**
-- `api_url` - Smooth server URL
-- `api_key` - Optional API key for authentication
-- `auto_sync` - Future feature for automatic sync
-
+5. **Metadata**:
+   - FreeCAD: Limited metadata in JSON
+   - Smooth: Rich metadata with audit logging and relationships
 ## Testing
 
 ### Unit Tests
@@ -215,63 +91,5 @@ python fctl_parser.py sample_tools/test_library.fctl
 
 ## Troubleshooting
 
-**Addon not appearing in FreeCAD:**
-- Check installation path: `~/.local/share/FreeCAD/Mod/Smooth/`
-- Verify `InitGui.py` and `package.xml` exist
-- Restart FreeCAD completely
-- Check FreeCAD Python console for errors
+TBD
 
-**Sync button not in toolbar:**
-- Ensure CAM workbench is active
-- Wait a few seconds for toolbar injection
-- Check FreeCAD Python console for errors
-
-**Connection errors:**
-- Verify Smooth server is running: `curl http://localhost:8000/api/health`
-- Check API URL in preferences
-- Test network connectivity
-- Verify firewall settings
-
-**Tool data mismatch:**
-- Check unit consistency (mm vs inches)
-- Verify shape files are accessible
-- Review FreeCAD console for parsing errors
-- Test round-trip conversion separately
-
-**Version conflicts:**
-- Check server version history in web interface
-- Pull latest version before making local changes
-- Use "Force push" carefully - it overwrites server data
-
-## Development
-
-See [DEVELOPMENT.md](./DEVELOPMENT.md) for:
-- Component architecture details
-- File format specifications
-- Testing procedures
-- Contributing guidelines
-
-## Documentation
-
-- **[DEVELOPMENT.md](./DEVELOPMENT.md)** - Development guide
-- **[../DEVELOPMENT.md](../DEVELOPMENT.md)** - Cross-project principles
-- **FreeCAD Docs** - https://wiki.freecad.org/Path_Workbench
-
-## Contributing
-
-Contributions welcome! Please:
-1. Test with real FreeCAD tool libraries
-2. Ensure round-trip conversion works
-3. Follow TDD (tests before implementation)
-4. Update docstrings
-5. Follow functional programming style
-
-## License
-
-[License information to be added]
-
-## Support
-
-- GitHub Issues: [Link to issues]
-- FreeCAD Forum: [Link to thread]
-- Documentation: [Link to docs]
