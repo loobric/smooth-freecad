@@ -31,26 +31,38 @@ class SmoothPreferencePage:
         ui_file.close()
         
         # Get references to UI elements
-        self.url_edit = self.form.findChild(QtGui.QLineEdit, "apiUrlEdit")
-        self.key_edit = self.form.findChild(QtGui.QLineEdit, "apiKeyEdit")
+        # Use QWidget for robust lookup regardless of Qt module mapping
+        self.url_edit = self.form.findChild(QtGui.QWidget, "apiUrlEdit")
+        self.key_edit = self.form.findChild(QtGui.QWidget, "apiKeyEdit")
         self.show_key_checkbox = self.form.findChild(QtGui.QCheckBox, "showKeyCheckbox")
         self.auto_sync_checkbox = self.form.findChild(QtGui.QCheckBox, "autoSyncCheckbox")
         self.test_button = self.form.findChild(QtGui.QPushButton, "testButton")
         self.status_label = self.form.findChild(QtGui.QLabel, "statusLabel")
         
         # Connect signals
-        self.show_key_checkbox.stateChanged.connect(self.toggle_key_visibility)
+        # Use both signals for maximum compatibility
+        self.show_key_checkbox.toggled.connect(self.toggle_key_visibility)
         self.test_button.clicked.connect(self.test_connection)
         
         # Load current settings
         self.load_settings()
+        # Apply initial echo mode based on current checkbox state
+        self.toggle_key_visibility(self.show_key_checkbox.isChecked())
     
     def toggle_key_visibility(self, state):
         """Toggle API key visibility."""
-        if state == QtCore.Qt.Checked:
-            self.key_edit.setEchoMode(QtGui.QLineEdit.Normal)
-        else:
-            self.key_edit.setEchoMode(QtGui.QLineEdit.Password)
+        checked = self.show_key_checkbox.isChecked()
+        mode = QtGui.QLineEdit.Normal if checked else QtGui.QLineEdit.Password
+        self.key_edit.setEchoMode(mode)
+
+    def _normalize_url(self, url: str) -> str:
+        """Normalize base URL by removing trailing '/' and trailing '/api' if present."""
+        if not url:
+            return url
+        url = url.strip().rstrip('/')
+        if url.endswith('/api'):
+            url = url[:-4]
+        return url
     
     def get_config_path(self):
         """Get path to config file."""
@@ -65,9 +77,13 @@ class SmoothPreferencePage:
             if config_path.exists():
                 with open(config_path, 'r') as f:
                     config = json.load(f)
-                    self.url_edit.setText(config.get("api_url", ""))
+                    # Normalize URL so users can paste either base or base/api
+                    url = self._normalize_url(config.get("api_url", ""))
+                    self.url_edit.setText(url)
                     self.key_edit.setText(config.get("api_key", ""))
                     self.auto_sync_checkbox.setChecked(config.get("auto_sync", False))
+            # Ensure checkbox state applies immediately
+            #self.toggle_key_visibility(self.show_key_checkbox.isChecked())
         except Exception as e:
             App.Console.PrintError(f"Failed to load Smooth settings: {e}\n")
     
@@ -75,7 +91,8 @@ class SmoothPreferencePage:
         """Save settings to config file (called by FreeCAD)."""
         try:
             config = {
-                "api_url": self.url_edit.text().strip(),
+                # Save normalized base URL (without trailing '/api')
+                "api_url": self._normalize_url(self.url_edit.text().strip()),
                 "api_key": self.key_edit.text().strip(),
                 "auto_sync": self.auto_sync_checkbox.isChecked()
             }
@@ -97,7 +114,8 @@ class SmoothPreferencePage:
     
     def test_connection(self):
         """Test connection to Smooth server."""
-        url = self.url_edit.text().strip()
+        # Always test the health endpoint at {base}/api/health
+        url = self._normalize_url(self.url_edit.text().strip())
         api_key = self.key_edit.text().strip()
         
         if not url:
@@ -107,8 +125,8 @@ class SmoothPreferencePage:
         try:
             import requests
             
-            # Test health endpoint
-            test_url = f"{url}/api/health" if "/api" not in url else f"{url}/health"
+            # Test health endpoint at normalized base
+            test_url = f"{url}/api/health"
             
             headers = {}
             if api_key:

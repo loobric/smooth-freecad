@@ -29,6 +29,17 @@ class SmoothConfig:
     """Configuration manager for Smooth connection settings."""
     
     @staticmethod
+    def _normalize_url(url: str) -> str:
+        """Normalize base URL: remove trailing slash and a trailing '/api' if present."""
+        if not url:
+            return url
+        url = url.strip().rstrip('/')
+        # If the URL ends with '/api', strip it so callers can append '/api/v1/...'
+        if url.endswith('/api'):
+            url = url[:-4]
+        return url
+
+    @staticmethod
     def get_config_path() -> Path:
         """Get path to config file."""
         config_dir = Path.home() / ".config" / "smooth"
@@ -40,14 +51,19 @@ class SmoothConfig:
         """Load configuration from file."""
         config_path = SmoothConfig.get_config_path()
         default_config = {
-            "api_url": "https://api.smooth.com",
+            "api_url": "https://api.loobric.com",
             "api_key": "",
             "auto_sync": False,
             "machine_id": "freecad_default"
         }
         if config_path.exists():
             with open(config_path, 'r') as f:
-                return {**default_config, **json.load(f)}
+                loaded = {**default_config, **json.load(f)}
+                # Normalize URL if user stored with trailing '/api' or '/'
+                loaded["api_url"] = SmoothConfig._normalize_url(loaded.get("api_url", ""))
+                return loaded
+        # Normalize default
+        default_config["api_url"] = SmoothConfig._normalize_url(default_config["api_url"])
         return default_config
     
     @staticmethod
