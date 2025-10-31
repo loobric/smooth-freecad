@@ -40,108 +40,23 @@ def initialize():
     
     # Register workbench manipulator
     try:
+        class SmoothManipulator:
+            def modifyToolBars(self):
+                return [{"append" : "Smooth_Sync", "toolBar" : "Tool Commands"}]
+                
+            def modifyMenuBar(self):
+                return [{"insert" : "Smooth_Sync", "menuItem" : "CAM_ToolBitDock", "after": ""}]
+
+
         App.Console.PrintMessage("Creating workbench manipulator...\n")
         
-        # Define manipulator class inside initialize to ensure proper scoping
-        class SmoothManipulator:
-            """Manipulator to add Smooth commands to FreeCAD menus and toolbars."""
-            
-            def modifyMenuBar(self):
-                """No menu bar modifications.
-                
-                Smooth button is added to CAM workbench toolbar via activation callback.
-                """
-                return []
-            
-            def modifyToolBars(self):
-                """No global toolbar modifications.
-                
-                Smooth button is added to CAM workbench toolbar via activation callback.
-                """
-                return []
-            
-            def modifyContextMenu(self, recipient):
-                """No context menu modifications."""
-                return []
-        
+
         manipulator = SmoothManipulator()
         App.Console.PrintMessage("Registering workbench manipulator...\n")
         Gui.addWorkbenchManipulator(manipulator)
         App.Console.PrintMessage("Smooth workbench manipulator registered\n")
     except Exception as e:
         App.Console.PrintError(f"Failed to register workbench manipulator: {e}\n")
-        import traceback
-        traceback.print_exc()
-    
-    # Register callback for CAM workbench activation
-    try:
-        from PySide import QtGui, QtCore
-        mw = Gui.getMainWindow()
-        cam_toolbar_added = [False]  # Use list to allow modification in nested function
-        
-        def add_to_cam_toolbar():
-            """Add Smooth button to CAM toolbar after a delay."""
-            try:
-                # Create a QAction for the Smooth_Sync command
-                import SmoothCommands
-                cmd = SmoothCommands.SmoothSyncCommand()
-                resources = cmd.GetResources()
-                
-                smooth_action = QtGui.QAction(mw)
-                smooth_action.setText(resources.get('MenuText', 'Sync with Smooth'))
-                smooth_action.setToolTip(resources.get('ToolTip', ''))
-                smooth_action.setObjectName("Smooth_Sync")
-                
-                # Set icon if available
-                icon_path = resources.get('Pixmap', '')
-                if icon_path and os.path.exists(icon_path):
-                    smooth_action.setIcon(QtGui.QIcon(icon_path))
-                
-                # Connect to the command's Activated method
-                smooth_action.triggered.connect(lambda: Gui.runCommand("Smooth_Sync"))
-                
-                App.Console.PrintMessage("Created Smooth_Sync action\n")
-                
-                # Find the "Tool Commands" toolbar in CAM workbench
-                toolbars = mw.findChildren(QtGui.QToolBar)
-                target_toolbar = None
-                for toolbar in toolbars:
-                    if toolbar.windowTitle() == "Tool Commands":
-                        target_toolbar = toolbar
-                        break
-                
-                if target_toolbar:
-                    # Check if our action is already in the toolbar
-                    existing_actions = target_toolbar.actions()
-                    for action in existing_actions:
-                        if action.objectName() == "Smooth_Sync":
-                            App.Console.PrintMessage("Smooth Sync button already exists in toolbar\n")
-                            cam_toolbar_added[0] = True
-                            return
-                    
-                    target_toolbar.addAction(smooth_action)
-                    App.Console.PrintMessage("✓ Smooth Sync added to CAM Tool Commands toolbar\n")
-                    cam_toolbar_added[0] = True
-                else:
-                    App.Console.PrintWarning("Tool Commands toolbar not found in CAM workbench\n")
-                    App.Console.PrintWarning("Available toolbars:\n")
-                    for toolbar in toolbars:
-                        App.Console.PrintWarning(f"  - {toolbar.windowTitle()}\n")
-            except Exception as e:
-                App.Console.PrintWarning(f"Could not add to CAM toolbar: {e}\n")
-                import traceback
-                traceback.print_exc()
-        
-        def on_workbench_activated():
-            wb = Gui.activeWorkbench()
-            if wb and wb.__class__.__name__ == "CAMWorkbench" and not cam_toolbar_added[0]:
-                # Use QTimer to add button after CAM workbench finishes initializing
-                QtCore.QTimer.singleShot(100, add_to_cam_toolbar)
-    
-        mw.workbenchActivated.connect(on_workbench_activated)
-        App.Console.PrintMessage("CAM workbench activation callback registered\n")
-    except Exception as e:
-        App.Console.PrintWarning(f"Could not register CAM workbench callback: {e}\n")
         import traceback
         traceback.print_exc()
     

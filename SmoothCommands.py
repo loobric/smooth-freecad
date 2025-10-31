@@ -31,7 +31,6 @@ class SmoothSyncCommand:
             'Pixmap': icon_path if os.path.exists(icon_path) else '',
             'MenuText': 'Sync with Smooth',
             'ToolTip': 'Synchronize FreeCAD tool libraries with Smooth server',
-            'Accel': 'Ctrl+Shift+S'  # Keyboard shortcut
         }
     
     def Activated(self):
