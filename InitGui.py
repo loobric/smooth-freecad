@@ -102,7 +102,7 @@ def initialize():
                 
                 App.Console.PrintMessage("Created Smooth_Sync action\n")
                 
-                # Find the "Helpful Tools" toolbar in CAM workbench
+                # Find the "Tool Commands" toolbar in CAM workbench
                 toolbars = mw.findChildren(QtGui.QToolBar)
                 target_toolbar = None
                 for toolbar in toolbars:
@@ -120,10 +120,13 @@ def initialize():
                             return
                     
                     target_toolbar.addAction(smooth_action)
-                    App.Console.PrintMessage("✓ Smooth Sync added to CAM Helpful Tools toolbar\n")
+                    App.Console.PrintMessage("✓ Smooth Sync added to CAM Tool Commands toolbar\n")
                     cam_toolbar_added[0] = True
                 else:
-                    App.Console.PrintWarning("Helpful Tools toolbar not found in CAM workbench\n")
+                    App.Console.PrintWarning("Tool Commands toolbar not found in CAM workbench\n")
+                    App.Console.PrintWarning("Available toolbars:\n")
+                    for toolbar in toolbars:
+                        App.Console.PrintWarning(f"  - {toolbar.windowTitle()}\n")
             except Exception as e:
                 App.Console.PrintWarning(f"Could not add to CAM toolbar: {e}\n")
                 import traceback
