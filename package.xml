@@ -12,7 +12,7 @@
   <content>
     <workbench>
       <classname>Smooth</classname>
-      <subdirectory>./</subdirectory>
+      <subdirectory>freecad/Smooth</subdirectory>
     </workbench>
   </content>
 

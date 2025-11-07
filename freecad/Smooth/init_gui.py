@@ -13,7 +13,6 @@ This addon does NOT create a separate workbench. Instead it:
 2. Adds a sync button to the CAM workbench toolbar
 """
 
-import os
 import FreeCAD as App
 import FreeCADGui as Gui
 

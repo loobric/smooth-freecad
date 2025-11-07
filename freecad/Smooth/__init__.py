@@ -13,3 +13,6 @@ File Formats:
 - .fctl - Tool library collections (JSON-based)
 - .fcstd - Custom tool shapes (FreeCAD documents)
 """
+
+import FreeCAD as App
+App.Console.PrintMessage("Loading Smooth addon (Init.py)...\n")
