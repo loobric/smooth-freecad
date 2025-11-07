@@ -34,7 +34,7 @@ Requirements:
     </workbench>
   </content>
 
-  <depend optional="false" version_gte="0.21">FreeCAD</depend>
+  <depend optional="false" version_gte="1.1">FreeCAD</depend>
   
   <tags>
     <tag>CAM</tag>
