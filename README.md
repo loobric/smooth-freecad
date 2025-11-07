@@ -1,14 +1,8 @@
 # ![Smooth Logo](Resources/icons/Smooth.svg) Smooth - Tool Library Synchronization for FreeCAD
 
-<p align="center">
-  <img src="https://img.shields.io/badge/FreeCAD-0.21+-blue.svg" alt="FreeCAD Version">
-  <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License">
-  <img src="https://img.shields.io/badge/CAM-Workbench-orange.svg" alt="CAM Workbench">
-</p>
+![FreeCAD Version](https://img.shields.io/badge/FreeCAD-0.21+-blue.svg) ![License](https://img.shields.io/badge/License-MIT-green.svg) ![CAM Workbench](https://img.shields.io/badge/CAM-Workbench-orange.svg)
 
-<p align="center">
-  <b>Keep your tool libraries synchronized across FreeCAD, CNC controllers, and tool management systems</b>
-</p>
+**Keep your tool libraries synchronized across FreeCAD, CNC controllers, and tool management systems**
 
 ---
 
@@ -203,10 +197,6 @@ MIT License - see [LICENSE](./LICENSE) file
 - All contributors and testers
 
 
-<p align="center">
-  <b>⭐ If you find Smooth useful, please star the project on GitHub! ⭐</b>
-</p>
+**⭐ If you find Smooth useful, please star the project on GitHub! ⭐**
 
-<p align="center">
-  Made with ❤️ for the FreeCAD community
-</p>
+Made with ❤️ for the FreeCAD community
