@@ -25,12 +25,12 @@ Requirements:
   <license file="LICENSE">MIT</license>
   <url type="repository" branch="main">https://github.com/loobric/smooth-freecad</url>
   <url type="readme">https://github.com/loobric/smooth-freecad/blob/main/README.md</url>
+  <icon>freecad/Smooth/Resources/icons/Smooth.svg</icon>
   
   <content>
     <workbench>
       <classname>Smooth</classname>
       <subdirectory>freecad/Smooth</subdirectory>
-      <icon>Resources/icons/Smooth.svg</icon>
     </workbench>
   </content>
 
