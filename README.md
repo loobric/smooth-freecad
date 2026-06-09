@@ -35,7 +35,7 @@ When a tool changes (new tool, new insert, wear offset, replacement), you update
                               │
                         ┌─────┴──────┐
                         │  Web UI    │
-                        │ Management │
+                        │ (planned)  │
                         └────────────┘
 ```
 
@@ -46,28 +46,28 @@ This addon connects FreeCAD's CAM workbench to Smooth, giving you **one-click sy
 ## What Does This Addon Do?
 
 ### **Export Tools to Smooth**
-- One-click upload of your FreeCAD tool library
+- One-click upload of your FreeCAD tool bits
 - Share tools across multiple machines and workstations
-- Automatic backup of your tool data
-- Custom shape files uploaded automatically
+- Server-side backup of your tool data
 
-### **Import Tools from Smooth**  
-- Download standardized tool libraries to FreeCAD
-- Get updates when tools are modified elsewhere
+### **Import Tools from Smooth**
+- Download tool data from the server into FreeCAD
 - Keep multiple FreeCAD installations in sync
-- Pull changes from CNC controllers or other sources
 
-### **Version Control**
-- Track changes to your tool libraries over time
-- Restore previous versions if something goes wrong
-- See who changed what and when
-- Complete audit trail for quality control
+> **Current limitations (alpha):** custom shape files are *not* uploaded or downloaded —
+> tool records reference shapes by path only. Holder/assembly data is not synchronized.
+> See the [v2 plan](https://github.com/loobric/smooth-core/issues/3) for the rework that
+> addresses these.
 
-### **Conflict Detection**
-- Warns before overwriting newer tool data
-- Choose which version to keep
-- Never lose work due to simultaneous edits
-- Smart merge options (coming soon)
+### **Version History (server-side)**
+- The Smooth server keeps version history and an audit trail of every change
+- History browsing from inside the addon is under development
+
+### **Conflict Handling**
+- The server rejects stale writes (optimistic locking), so simultaneous edits
+  cannot silently overwrite each other
+- A guided conflict-resolution flow is planned for the v2 rework — today, a rejected
+  sync must be retried after re-importing
 
 ---
 
@@ -75,14 +75,7 @@ This addon connects FreeCAD's CAM workbench to Smooth, giving you **one-click sy
 
 ### Installation
 
-**Via Addon Manager** (Recommended)
-1. Open FreeCAD
-2. Go to **Tools → Addon Manager**
-3. Search for **"Smooth"**
-4. Click **Install**
-5. Restart FreeCAD
-
-**Manual Installation**
+**Manual Installation** (Addon Manager listing is planned, not yet submitted)
 ```bash
 mkdir -p ~/.local/share/FreeCAD/Mod
 git clone https://github.com/loobric/smooth-freecad.git 
@@ -91,7 +84,7 @@ git clone https://github.com/loobric/smooth-freecad.git
 ### First-Time Setup (2 minutes)
 
 **Step 1: Find a Smooth Server**
-You can self host a smooth server of get a free account at [Loobric](https://loobric.com)
+Run your own Smooth server (see [smooth-core](https://github.com/loobric/smooth-core)). A hosted option is planned but not yet available.
 
 Get the server url and an API key from the server.
 
@@ -121,8 +114,7 @@ Get the server url and an API key from the server.
 2. Select **"Export new tools to Smooth"**
 3. The addon reads your `.fctb` (tool bits) and `.fctl` (library) files
 4. Converts them to Smooth's universal format
-5. Uploads to the server
-6. Custom shape files are uploaded automatically
+5. Uploads to the server (shape files are referenced by path, not uploaded — see limitations above)
 
 **Result:** Your tools are now in the central database, accessible from anywhere!
 
@@ -133,23 +125,16 @@ Get the server url and an API key from the server.
 3. The addon downloads tool data from Smooth
 4. Converts back to FreeCAD format
 5. Writes `.fctb` and `.fctl` files
-6. Downloads custom shape files
-7. Reloads FreeCAD library
+6. Reloads FreeCAD library
 
 **Result:** Your FreeCAD installation has the latest tools from the central database!
 
 ### Handling Conflicts
 
-If someone else updated a tool library while you were working:
-
-1. **Conflict Warning** dialog appears
-2. Choose:
-   - **Force Push** - Overwrite server with your version
-   - **Choose Version** - View history and pick which to keep
-   - **Cancel** - Stop and resolve manually
-3. If you choose version, see full history with timestamps
-4. Select version to restore
-5. Sync completes successfully
+The server uses optimistic locking: if data changed on the server since your last sync,
+your push is rejected rather than silently overwriting it. Re-import to pick up the
+server state, then re-apply your change. A guided resolution dialog is part of the
+planned v2 rework.
 
 ---
 
