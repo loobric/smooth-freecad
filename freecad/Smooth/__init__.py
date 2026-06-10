@@ -12,7 +12,15 @@ File Formats:
 - .fctb - Tool bit definitions (JSON-based)
 - .fctl - Tool library collections (JSON-based)
 - .fcstd - Custom tool shapes (FreeCAD documents)
+
+The pure modules in this package (mapping, client, sync) deliberately have
+no FreeCAD dependency so they can be tested headless; only the GUI modules
+import FreeCAD, and this __init__ must not force it.
 """
 
-import FreeCAD as App
-App.Console.PrintMessage("Loading Smooth addon (Init.py)...\n")
+try:
+    import FreeCAD as App
+    App.Console.PrintMessage("Loading Smooth addon (Init.py)...\n")
+except ImportError:
+    # Headless context (tests, CI): the pure modules work without FreeCAD.
+    App = None
