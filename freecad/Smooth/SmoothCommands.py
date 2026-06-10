@@ -36,7 +36,10 @@ class SmoothSyncCommand:
     def Activated(self):
         """Execute when command is activated."""
         try:
-            import SmoothDialog
+            try:
+                from freecad.Smooth import SmoothDialog
+            except ImportError:
+                import SmoothDialog  # flat layout on sys.path
             dialog = SmoothDialog.SmoothSyncDialog()
             dialog.exec_()
         except Exception as e:
