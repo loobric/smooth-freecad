@@ -81,6 +81,16 @@ def export_tools(tools_dir, client, log=lambda msg: None):
     bit_paths, lib_paths = scan_tools_dir(tools_dir)
     server_records = {r["id"]: r for r in client.list_records()}
 
+    # Re-adoption index (field finding: FreeCAD's ToolBit editor drops
+    # unknown top-level keys on save, destroying the 'smooth' identity
+    # key). The .fctb 'id' field IS preserved by the editor and we store
+    # it verbatim server-side - an exact-identifier match, not a heuristic.
+    records_by_fctb_id = {}
+    for r in server_records.values():
+        fid = ((r.get("extra") or {}).get("freecad", {}).get("fctb", {})).get("id")
+        if fid:
+            records_by_fctb_id.setdefault(fid, []).append(r)
+
     # --- bits ---------------------------------------------------------------
     for path in bit_paths:
         basename = os.path.basename(path)
@@ -90,6 +100,25 @@ def export_tools(tools_dir, client, log=lambda msg: None):
             summary["errors"].append("%s: unreadable (%s)" % (basename, e))
             continue
         payload, prior_id = mapping.fctb_to_record(doc)
+
+        if not prior_id or prior_id not in server_records:
+            # smooth key missing (editor save) or stale: re-adopt by exact
+            # .fctb id before considering a create
+            fid = payload["extra"]["freecad"]["fctb"].get("id")
+            candidates = records_by_fctb_id.get(fid, []) if fid else []
+            if len(candidates) == 1:
+                if prior_id:
+                    log("%s: stale id; re-adopted by fctb id '%s'" % (basename, fid))
+                else:
+                    log("%s: identity key missing (editor save?); re-adopted "
+                        "by fctb id '%s'" % (basename, fid))
+                prior_id = candidates[0]["id"]
+            elif len(candidates) > 1:
+                summary["errors"].append(
+                    "%s: ambiguous - %d server records share fctb id '%s'; "
+                    "not guessing" % (basename, len(candidates), fid)
+                )
+                continue
 
         if prior_id and prior_id in server_records:
             current = server_records[prior_id]

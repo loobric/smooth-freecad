@@ -194,3 +194,52 @@ def test_library_member_without_record_is_reported(tools_dir):
     # library still created with the resolvable members
     library = list(server.libraries.values())[0]
     assert len(library["tool_record_ids"]) == 2
+
+
+@pytest.mark.unit
+def test_editor_wiped_smooth_key_readopts_no_duplicate(tools_dir):
+    """Field finding: FreeCAD's ToolBit editor drops unknown top-level keys
+    on save, destroying the 'smooth' identity key. Export must re-adopt the
+    server record by the .fctb 'id' field (exact match on FreeCAD's own
+    stable identifier, stored verbatim server-side) instead of duplicating."""
+    server = FakeServer()
+    sync.export_tools(str(tools_dir), server)
+    assert len(server.records) == 3
+
+    # simulate the editor: rewrite the file without the smooth key
+    path = tools_dir / "Bit" / "drill_5.0mm.fctb"
+    doc = json.loads(path.read_text())
+    old_id = doc.pop("smooth")["record_id"]
+    doc["parameter"]["Diameter"] = "5.20 mm"  # the edit the user made
+    path.write_text(json.dumps(doc))
+
+    summary = sync.export_tools(str(tools_dir), server)
+    assert summary["errors"] == []
+    assert len(server.records) == 3          # no duplicate
+    assert summary["created"] == 0 and summary["updated"] == 4
+    assert server.records[old_id]["geometry"]["diameter"] == 5.2
+    # identity key restored in the file
+    restored = json.loads(path.read_text())
+    assert restored["smooth"]["record_id"] == old_id
+
+
+@pytest.mark.unit
+def test_ambiguous_fctb_id_is_error_not_guess(tools_dir):
+    """If two server records claim the same .fctb id (shouldn't happen, but
+    data is data), re-adoption refuses and reports - never guesses."""
+    server = FakeServer()
+    sync.export_tools(str(tools_dir), server)
+
+    # forge a second record with the same embedded fctb id as the drill
+    drill_doc = json.loads((tools_dir / "Bit" / "drill_5.0mm.fctb").read_text())
+    fctb_id = drill_doc["extra"]["freecad"]["fctb"]["id"] if "extra" in drill_doc else "drill_5.0mm"
+    clone = {"name": "impostor", "extra": {"freecad": {"fctb": {"id": "drill_5.0mm"}}}}
+    server.create_records([clone])
+
+    # wipe the smooth key so export must re-adopt
+    doc = json.loads((tools_dir / "Bit" / "drill_5.0mm.fctb").read_text())
+    doc.pop("smooth", None)
+    (tools_dir / "Bit" / "drill_5.0mm.fctb").write_text(json.dumps(doc))
+
+    summary = sync.export_tools(str(tools_dir), server)
+    assert any("drill_5.0mm" in e and "ambiguous" in e.lower() for e in summary["errors"])
