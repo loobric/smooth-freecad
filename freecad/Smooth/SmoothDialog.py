@@ -7,8 +7,8 @@ Smooth sync dialog — v2.
 
 Deliberately thin: all sync logic lives in the headless-tested modules
 (mapping.py, client.py, sync.py); this dialog only gathers config, runs
-the export, and shows the summary. Import (server -> FreeCAD) arrives
-with the round-trip milestone (smooth-freecad#6) and its button says so.
+export/import, and shows the summaries. Import never overwrites local
+edits: pending changes are kept and conflicts are reported, not merged.
 
 GUI code cannot be tested headless — keep anything with behavior OUT of
 this file.
@@ -106,9 +106,11 @@ class SmoothSyncDialog:
         buttons.addWidget(self.export_button)
 
         self.import_button = QtGui.QPushButton("Import from Smooth")
-        self.import_button.setEnabled(False)
+        self.import_button.clicked.connect(self._run_import)
         self.import_button.setToolTip(
-            "Arrives with the round-trip milestone (smooth-freecad#6)."
+            "Bring server-side changes into your tool files. Local edits "
+            "are never overwritten: pending changes are kept, and "
+            "both-sides-changed files are reported as conflicts."
         )
         buttons.addWidget(self.import_button)
 
@@ -136,6 +138,7 @@ class SmoothSyncDialog:
             self._append(f"Cannot reach server: {e}\n"
                          "Check Edit → Preferences → CAM → Smooth.")
             self.export_button.setEnabled(False)
+            self.import_button.setEnabled(False)
 
     def _run_export(self):
         self.export_button.setEnabled(False)
@@ -155,3 +158,30 @@ class SmoothSyncDialog:
         for error in summary["errors"]:
             self._append(f"  ⚠ {error}")
         self.export_button.setEnabled(True)
+
+    def _run_import(self):
+        self.import_button.setEnabled(False)
+        tools_dir = get_tools_dir()
+        self._append(f"Importing into {tools_dir} …")
+        try:
+            summary = sync.import_tools(str(tools_dir), self._client(),
+                                        log=self._append)
+        except SmoothError as e:
+            self._append(f"\nImport failed: {e}")
+            self.import_button.setEnabled(True)
+            return
+        self._append(
+            f"\nDone: {summary['written']} written, "
+            f"{summary['unchanged']} unchanged, "
+            f"{summary['pending_export']} kept (local changes pending export), "
+            f"{len(summary['conflicts'])} conflict(s), "
+            f"{len(summary['errors'])} error(s)."
+        )
+        for conflict in summary["conflicts"]:
+            self._append(f"  ⚠ CONFLICT: {conflict}")
+        for error in summary["errors"]:
+            self._append(f"  ⚠ {error}")
+        if summary["written"]:
+            self._append("Restart FreeCAD (or reload the tool library) to "
+                         "see imported changes in the editor.")
+        self.import_button.setEnabled(True)

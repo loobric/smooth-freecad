@@ -100,6 +100,7 @@ def export_tools(tools_dir, client, log=lambda msg: None):
             summary["errors"].append("%s: unreadable (%s)" % (basename, e))
             continue
         payload, prior_id = mapping.fctb_to_record(doc)
+        payload["extra"]["freecad"]["filename"] = basename
 
         if not prior_id or prior_id not in server_records:
             # smooth key missing (editor save) or stale: re-adopt by exact
@@ -193,5 +194,177 @@ def export_tools(tools_dir, client, log=lambda msg: None):
         summary[action] += 1
         _writeback_identity(path, "library_id", library["id"], library["version"])
         log("%s %s -> %s" % (action, basename, library["id"][:8]))
+
+    return summary
+
+
+# ---------------------------------------------------------------------------
+# Import (server -> FreeCAD)
+# ---------------------------------------------------------------------------
+
+def _sans_smooth(doc):
+    """Copy of a tool document without the identity plumbing key."""
+    return {k: v for k, v in doc.items() if k != "smooth"}
+
+
+def _slug(name):
+    """Filesystem-safe filename stem from a record name."""
+    import re
+    return re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("_") or "tool"
+
+
+def import_tools(tools_dir, client, log=lambda msg: None):
+    """Import server state into the FreeCAD tool directories.
+
+    Three-way merge per file, using the server-stored verbatim document as
+    the base (what the server last saw from FreeCAD):
+
+    - local == regenerated            -> unchanged (refresh stamp if stale)
+    - local == base, server changed   -> write server version
+    - server == base, local changed   -> keep local ("pending export")
+    - both changed                    -> CONFLICT: never overwritten, reported
+
+    Returns a summary dict:
+        {"written": int, "unchanged": int, "pending_export": int,
+         "conflicts": [str], "errors": [str]}
+    """
+    summary = {"written": 0, "unchanged": 0, "pending_export": 0,
+               "conflicts": [], "errors": []}
+    bit_dir = os.path.join(tools_dir, "Bit")
+    lib_dir = os.path.join(tools_dir, "Library")
+    os.makedirs(bit_dir, exist_ok=True)
+    os.makedirs(lib_dir, exist_ok=True)
+
+    bit_paths, lib_paths = scan_tools_dir(tools_dir)
+
+    # Index local files by server identity (smooth key, then fctb id)
+    local_by_record_id = {}
+    local_fctb_ids = {}
+    local_by_name = {}
+    for path in bit_paths:
+        local_by_name[os.path.basename(path)] = path
+        try:
+            doc = _read_json(path)
+        except (OSError, ValueError) as e:
+            summary["errors"].append("%s: unreadable (%s)" % (os.path.basename(path), e))
+            continue
+        rid = (doc.get("smooth") or {}).get("record_id")
+        if rid:
+            local_by_record_id[rid] = path
+        if doc.get("id"):
+            local_fctb_ids.setdefault(doc["id"], path)
+
+    path_by_record_id = {}
+
+    # --- bits ----------------------------------------------------------------
+    for record in client.list_records():
+        meta = (record.get("extra") or {}).get("freecad", {})
+        base = meta.get("fctb")
+        regenerated = mapping.record_to_fctb(record)
+        fctb_id = (base or {}).get("id")
+        path = (local_by_record_id.get(record["id"])
+                or (fctb_id and local_fctb_ids.get(fctb_id))
+                or (meta.get("filename") and local_by_name.get(meta["filename"])))
+
+        if not path:
+            # new from the server: prefer its original filename, else derive
+            stem = (meta.get("filename") or "").rsplit(".fctb", 1)[0] \
+                or fctb_id or _slug(record.get("name", "tool"))
+            path = os.path.join(bit_dir, stem + ".fctb")
+            if os.path.exists(path):
+                path = os.path.join(bit_dir, "%s_%s.fctb" % (stem, record["id"][:8]))
+            _write_json(path, regenerated)
+            summary["written"] += 1
+            path_by_record_id[record["id"]] = os.path.basename(path)
+            log("new from server: %s" % os.path.basename(path))
+            continue
+
+        path_by_record_id[record["id"]] = os.path.basename(path)
+        basename = os.path.basename(path)
+        try:
+            local = _read_json(path)
+        except (OSError, ValueError) as e:
+            summary["errors"].append("%s: unreadable (%s)" % (basename, e))
+            continue
+
+        local_doc = _sans_smooth(local)
+        regen_doc = _sans_smooth(regenerated)
+        if local_doc == regen_doc:
+            summary["unchanged"] += 1
+            if (local.get("smooth") or {}).get("version") != record.get("version"):
+                _writeback_identity(path, "record_id", record["id"], record["version"])
+            continue
+        if base is not None and local_doc == _sans_smooth(base):
+            _write_json(path, regenerated)
+            summary["written"] += 1
+            log("updated from server: %s" % basename)
+            continue
+        if base is not None and regen_doc == _sans_smooth(base):
+            summary["pending_export"] += 1
+            log("local changes pending export, kept: %s" % basename)
+            continue
+        summary["conflicts"].append(
+            "%s: changed locally AND on the server - not overwritten. "
+            "Export to keep the local version, or delete the file and "
+            "re-import to take the server's." % basename
+        )
+
+    # --- libraries -------------------------------------------------------------
+    local_lib_by_id = {}
+    for path in lib_paths:
+        try:
+            doc = _read_json(path)
+        except (OSError, ValueError):
+            continue
+        lid = (doc.get("smooth") or {}).get("library_id")
+        if lid:
+            local_lib_by_id[lid] = path
+
+    for library in client.list_libraries():
+        meta = (library.get("extra") or {}).get("freecad", {})
+        base = meta.get("fctl")
+        regenerated, unresolved = mapping.library_to_fctl(library, path_by_record_id)
+        for rid in unresolved:
+            summary["errors"].append(
+                "library '%s': member %s has no local file" % (library.get("name"), rid)
+            )
+        path = local_lib_by_id.get(library["id"])
+
+        if not path:
+            stem = _slug(library.get("name", "library"))
+            path = os.path.join(lib_dir, stem + ".fctl")
+            if os.path.exists(path):
+                path = os.path.join(lib_dir, "%s_%s.fctl" % (stem, library["id"][:8]))
+            _write_json(path, regenerated)
+            summary["written"] += 1
+            log("new from server: %s" % os.path.basename(path))
+            continue
+
+        basename = os.path.basename(path)
+        try:
+            local = _read_json(path)
+        except (OSError, ValueError) as e:
+            summary["errors"].append("%s: unreadable (%s)" % (basename, e))
+            continue
+
+        local_doc = _sans_smooth(local)
+        regen_doc = _sans_smooth(regenerated)
+        if local_doc == regen_doc:
+            summary["unchanged"] += 1
+            if (local.get("smooth") or {}).get("version") != library.get("version"):
+                _writeback_identity(path, "library_id", library["id"], library["version"])
+            continue
+        if base is not None and local_doc == _sans_smooth(base):
+            _write_json(path, regenerated)
+            summary["written"] += 1
+            log("updated from server: %s" % basename)
+            continue
+        if base is not None and regen_doc == _sans_smooth(base):
+            summary["pending_export"] += 1
+            log("local changes pending export, kept: %s" % basename)
+            continue
+        summary["conflicts"].append(
+            "%s: changed locally AND on the server - not overwritten." % basename
+        )
 
     return summary

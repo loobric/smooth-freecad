@@ -204,6 +204,7 @@ def fctl_to_library(fctl, record_id_by_path):
             "label": doc.get("label"),
             "version": doc.get("version", 1),
             "numbers": numbers,
+            "fctl": doc,
         }},
     }
     return payload, unresolved, smooth_meta.get("library_id")
@@ -220,6 +221,7 @@ def library_to_fctl(library, path_by_record_id):
       the caller to export first
     """
     freecad_meta = (library.get("extra") or {}).get("freecad", {})
+    base = freecad_meta.get("fctl") or {}
     numbers = dict(freecad_meta.get("numbers") or {})
     used = {n for n in numbers.values() if isinstance(n, int)}
     next_nr = max(used) + 1 if used else 1
@@ -237,10 +239,9 @@ def library_to_fctl(library, path_by_record_id):
             next_nr += 1
         tools.append({"nr": nr, "path": path})
 
-    doc = {
-        "label": library.get("name", freecad_meta.get("label") or "library"),
-        "tools": tools,
-        "version": freecad_meta.get("version", 1),
-        "smooth": {"library_id": library["id"], "version": library.get("version")},
-    }
+    doc = copy.deepcopy(base)
+    doc["label"] = library.get("name", freecad_meta.get("label") or "library")
+    doc["tools"] = tools
+    doc.setdefault("version", freecad_meta.get("version", 1))
+    doc["smooth"] = {"library_id": library["id"], "version": library.get("version")}
     return doc, unresolved
