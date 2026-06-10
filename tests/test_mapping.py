@@ -134,8 +134,8 @@ def test_fctl_round_trip_preserves_numbers_and_order():
     paths = [t["path"] for t in fctl["tools"]]
     id_by_path = {p: f"rec-{i}" for i, p in enumerate(paths)}
 
-    payload, unresolved = fctl_to_library(fctl, id_by_path)
-    assert unresolved == []
+    payload, unresolved, prior_id = fctl_to_library(fctl, id_by_path)
+    assert unresolved == [] and prior_id is None
     assert payload["name"] == fctl["label"]
     assert len(payload["tool_record_ids"]) == len(fctl["tools"])
 
@@ -143,6 +143,7 @@ def test_fctl_round_trip_preserves_numbers_and_order():
     path_by_id = {v: k for k, v in id_by_path.items()}
     regenerated, unresolved = library_to_fctl(library, path_by_id)
     assert unresolved == []
+    assert regenerated.pop("smooth") == {"library_id": "lib-1", "version": 1}
     assert regenerated == fctl
 
 
@@ -150,7 +151,7 @@ def test_fctl_round_trip_preserves_numbers_and_order():
 def test_fctl_unresolved_paths_are_reported_not_dropped():
     fctl = {"label": "x", "version": 1,
             "tools": [{"nr": 1, "path": "known.fctb"}, {"nr": 2, "path": "mystery.fctb"}]}
-    payload, unresolved = fctl_to_library(fctl, {"known.fctb": "rec-1"})
+    payload, unresolved, _ = fctl_to_library(fctl, {"known.fctb": "rec-1"})
     assert unresolved == ["mystery.fctb"]
     assert payload["tool_record_ids"] == ["rec-1"]
 

@@ -178,10 +178,13 @@ def fctl_to_library(fctl, record_id_by_path):
         record_id_by_path: .fctb path -> server record id (from the bit
             export that must precede library export)
 
-    Returns (payload, unresolved_paths): paths with no record id are
-    reported, never silently dropped.
+    Returns (payload, unresolved_paths, library_id): library_id is the
+    server id from a prior export (additive 'smooth' key), or None.
+    Unresolved paths are reported, never silently dropped.
     """
-    tools = fctl.get("tools", []) or []
+    doc = copy.deepcopy(fctl)
+    smooth_meta = doc.pop("smooth", None) or {}
+    tools = doc.get("tools", []) or []
     record_ids = []
     numbers = {}
     unresolved = []
@@ -195,15 +198,15 @@ def fctl_to_library(fctl, record_id_by_path):
         numbers[record_id] = tool.get("nr")
 
     payload = {
-        "name": fctl.get("label") or "library",
+        "name": doc.get("label") or "library",
         "tool_record_ids": record_ids,
         "extra": {"freecad": {
-            "label": fctl.get("label"),
-            "version": fctl.get("version", 1),
+            "label": doc.get("label"),
+            "version": doc.get("version", 1),
             "numbers": numbers,
         }},
     }
-    return payload, unresolved
+    return payload, unresolved, smooth_meta.get("library_id")
 
 
 def library_to_fctl(library, path_by_record_id):
@@ -238,5 +241,6 @@ def library_to_fctl(library, path_by_record_id):
         "label": library.get("name", freecad_meta.get("label") or "library"),
         "tools": tools,
         "version": freecad_meta.get("version", 1),
+        "smooth": {"library_id": library["id"], "version": library.get("version")},
     }
     return doc, unresolved
