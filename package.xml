@@ -1,30 +1,28 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no" ?>
 <package format="1" xmlns="https://wiki.freecad.org/Package_Metadata">
   <name>Smooth</name>
-  <description>The Smooth addon provides bidirectional synchronization between FreeCAD's CAM tool 
-libraries and the Smooth tool data exchange system.
-    
-This addon adds a "Sync with Smooth" button to the CAM workbench toolbar and 
-a preference page to FreeCAD settings for server configuration.
-    
-Features:
-- Bidirectional sync: Import and export tools in one operation
-- Bulk operations: Efficiently sync entire tool libraries
-- FreeCAD Path integration: Works directly within CAM workflow
-- Preserves tool metadata and parameters
-- API key authentication support
-    
+  <description>Synchronize FreeCAD's CAM tool libraries with a Smooth tool data server.
+
+Adds a "Sync with Smooth" button to the CAM workbench toolbar and a
+preference page for server configuration.
+
+Current capabilities (v2 rework in progress):
+- Export tool bits and libraries to the server, losslessly; re-export
+  updates in place (never duplicates)
+- Exported files carry their server identity; unknown keys (e.g. F&amp;S
+  presets) survive round trips untouched
+- Import (server to FreeCAD) arrives with the next milestone
+
 Requirements:
-- FreeCAD 0.21 or later with CAM (Path) workbench
-- Access to a Smooth server instance
-- Network connectivity for API access
-- Python requests library (usually included with FreeCAD)</description>
-  <version>0.1.0</version>
-  <date>2025-01-24</date>
+- FreeCAD 1.1 or later with the CAM workbench
+- A Smooth server (self-hosted or hosted) - see https://loobric.com
+- Standard library only: no extra Python packages</description>
+  <version>0.2.0</version>
+  <date>2026-06-10</date>
   <maintainer email="sliptonic@gmail.com">Brad Collette</maintainer>
   <license file="LICENSE">MIT</license>
-  <url type="repository" branch="main">https://github.com/loobric/smooth-freecad</url>
-  <url type="readme">https://github.com/loobric/smooth-freecad/blob/main/README.md</url>
+  <url type="repository" branch="master">https://github.com/loobric/smooth-freecad</url>
+  <url type="readme">https://github.com/loobric/smooth-freecad/blob/master/README.md</url>
   <icon>freecad/Smooth/Resources/icons/Smooth.svg</icon>
   
   <content>
