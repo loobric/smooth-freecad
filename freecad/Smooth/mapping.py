@@ -167,19 +167,21 @@ def record_to_fctb(record):
 
 
 # ---------------------------------------------------------------------------
-# .fctl <-> Library
+# .fctl <-> ToolSet
 # ---------------------------------------------------------------------------
 
-def fctl_to_library(fctl, record_id_by_path):
-    """Map a parsed .fctl document to a Library payload.
+def fctl_to_tool_set(fctl, record_id_by_path):
+    """Map a parsed .fctl document (a FreeCAD tool library) to a ToolSet
+    payload.
 
     Args:
         fctl: parsed .fctl ({"label", "tools": [{"nr", "path"}], "version"})
         record_id_by_path: .fctb path -> server record id (from the bit
             export that must precede library export)
 
-    Returns (payload, unresolved_paths, library_id): library_id is the
-    server id from a prior export (additive 'smooth' key), or None.
+    Returns (payload, unresolved_paths, tool_set_id): tool_set_id is the
+    server id from a prior export (additive 'smooth' key; the legacy
+    'library_id' spelling from pre-rename installs is honored on read).
     Unresolved paths are reported, never silently dropped.
     """
     doc = copy.deepcopy(fctl)
@@ -207,11 +209,12 @@ def fctl_to_library(fctl, record_id_by_path):
             "fctl": doc,
         }},
     }
-    return payload, unresolved, smooth_meta.get("library_id")
+    return payload, unresolved, (smooth_meta.get("tool_set_id")
+                                 or smooth_meta.get("library_id"))
 
 
-def library_to_fctl(library, path_by_record_id):
-    """Regenerate a .fctl document from a Library.
+def tool_set_to_fctl(tool_set, path_by_record_id):
+    """Regenerate a .fctl document (FreeCAD tool library) from a ToolSet.
 
     Assumptions:
     - Membership order comes from tool_record_ids (the canonical list)
@@ -220,7 +223,7 @@ def library_to_fctl(library, path_by_record_id):
     - Members with no known .fctb path are returned in `unresolved` for
       the caller to export first
     """
-    freecad_meta = (library.get("extra") or {}).get("freecad", {})
+    freecad_meta = (tool_set.get("extra") or {}).get("freecad", {})
     base = freecad_meta.get("fctl") or {}
     numbers = dict(freecad_meta.get("numbers") or {})
     used = {n for n in numbers.values() if isinstance(n, int)}
@@ -228,7 +231,7 @@ def library_to_fctl(library, path_by_record_id):
 
     tools = []
     unresolved = []
-    for record_id in library.get("tool_record_ids", []):
+    for record_id in tool_set.get("tool_record_ids", []):
         path = path_by_record_id.get(record_id)
         if path is None:
             unresolved.append(record_id)
@@ -240,8 +243,9 @@ def library_to_fctl(library, path_by_record_id):
         tools.append({"nr": nr, "path": path})
 
     doc = copy.deepcopy(base)
-    doc["label"] = library.get("name", freecad_meta.get("label") or "library")
+    doc["label"] = tool_set.get("name", freecad_meta.get("label") or "library")
     doc["tools"] = tools
     doc.setdefault("version", freecad_meta.get("version", 1))
-    doc["smooth"] = {"library_id": library["id"], "version": library.get("version")}
+    doc["smooth"] = {"tool_set_id": tool_set["id"],
+                     "version": tool_set.get("version")}
     return doc, unresolved

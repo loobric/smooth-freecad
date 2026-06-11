@@ -120,7 +120,7 @@ def test_server_born_record_materializes_as_new_file(tools_dir):
 def test_server_membership_change_rewrites_fctl(tools_dir):
     server = FakeServer()
     sync.export_tools(str(tools_dir), server)
-    library = list(server.libraries.values())[0]
+    library = list(server.tool_sets.values())[0]
     probe_rid = read(tools_dir / "Bit" / "probe.fctb")["smooth"]["record_id"]
     library["tool_record_ids"] = library["tool_record_ids"] + [probe_rid]
     library["version"] += 1

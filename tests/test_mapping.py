@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 
 from freecad.Smooth.mapping import (
-    fctb_to_record, record_to_fctb, fctl_to_library, library_to_fctl,
+    fctb_to_record, record_to_fctb, fctl_to_tool_set, tool_set_to_fctl,
     parse_quantity, format_quantity,
 )
 
@@ -134,16 +134,16 @@ def test_fctl_round_trip_preserves_numbers_and_order():
     paths = [t["path"] for t in fctl["tools"]]
     id_by_path = {p: f"rec-{i}" for i, p in enumerate(paths)}
 
-    payload, unresolved, prior_id = fctl_to_library(fctl, id_by_path)
+    payload, unresolved, prior_id = fctl_to_tool_set(fctl, id_by_path)
     assert unresolved == [] and prior_id is None
     assert payload["name"] == fctl["label"]
     assert len(payload["tool_record_ids"]) == len(fctl["tools"])
 
     library = fake_record(payload, record_id="lib-1")
     path_by_id = {v: k for k, v in id_by_path.items()}
-    regenerated, unresolved = library_to_fctl(library, path_by_id)
+    regenerated, unresolved = tool_set_to_fctl(library, path_by_id)
     assert unresolved == []
-    assert regenerated.pop("smooth") == {"library_id": "lib-1", "version": 1}
+    assert regenerated.pop("smooth") == {"tool_set_id": "lib-1", "version": 1}
     assert regenerated == fctl
 
 
@@ -151,7 +151,7 @@ def test_fctl_round_trip_preserves_numbers_and_order():
 def test_fctl_unresolved_paths_are_reported_not_dropped():
     fctl = {"label": "x", "version": 1,
             "tools": [{"nr": 1, "path": "known.fctb"}, {"nr": 2, "path": "mystery.fctb"}]}
-    payload, unresolved, _ = fctl_to_library(fctl, {"known.fctb": "rec-1"})
+    payload, unresolved, _ = fctl_to_tool_set(fctl, {"known.fctb": "rec-1"})
     assert unresolved == ["mystery.fctb"]
     assert payload["tool_record_ids"] == ["rec-1"]
 
@@ -162,7 +162,7 @@ def test_member_added_server_side_gets_next_free_number():
                "tool_record_ids": ["rec-1", "rec-new"],
                "extra": {"freecad": {"label": "default", "version": 1,
                                      "numbers": {"rec-1": 11}}}}
-    doc, unresolved = library_to_fctl(
+    doc, unresolved = tool_set_to_fctl(
         library, {"rec-1": "a.fctb", "rec-new": "b.fctb"})
     assert unresolved == []
     assert doc["tools"] == [{"nr": 11, "path": "a.fctb"},

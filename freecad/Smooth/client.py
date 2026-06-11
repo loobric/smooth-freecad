@@ -5,7 +5,7 @@
 """
 Smooth facade API client — stdlib only, no FreeCAD imports.
 
-Speaks ONLY the published v2 facade (ToolRecord, Library); deep-entity
+Speaks ONLY the published v2 facade (ToolRecord, ToolSet); deep-entity
 routes are off-limits by design (smooth-core decision G3). All traffic
 goes through one seam, http_json(), so tests stub exactly one function —
 the same pattern as the LinuxCNC client.
@@ -73,15 +73,15 @@ class SmoothClient:
     def delete_records(self, ids):
         return self._call("DELETE", "/tool-records", {"ids": ids})
 
-    # Libraries
-    def list_libraries(self):
-        return self._call("GET", "/libraries")["items"]
+    # ToolSets (each backs one local FreeCAD tool library / .fctl)
+    def list_tool_sets(self):
+        return self._call("GET", "/tool-sets")["items"]
 
-    def create_libraries(self, items):
-        return self._call("POST", "/libraries", {"items": items})
+    def create_tool_sets(self, items):
+        return self._call("POST", "/tool-sets", {"items": items})
 
-    def update_libraries(self, items):
-        return self._call("PATCH", "/libraries", {"items": items})
+    def update_tool_sets(self, items):
+        return self._call("PATCH", "/tool-sets", {"items": items})
 
-    def delete_libraries(self, ids):
-        return self._call("DELETE", "/libraries", {"ids": ids})
+    def delete_tool_sets(self, ids):
+        return self._call("DELETE", "/tool-sets", {"ids": ids})

@@ -17,7 +17,7 @@ class FakeServer:
 
     def __init__(self):
         self.records = {}
-        self.libraries = {}
+        self.tool_sets = {}
         self._n = 0
 
     def _next(self, prefix):
@@ -57,28 +57,28 @@ class FakeServer:
                 del self.records[rid]; n += 1
         return {"success_count": n, "errors": [], "items": []}
 
-    def delete_libraries(self, ids):
+    def delete_tool_sets(self, ids):
         n = 0
         for lid in ids:
-            if lid in self.libraries:
-                del self.libraries[lid]; n += 1
+            if lid in self.tool_sets:
+                del self.tool_sets[lid]; n += 1
         return {"success_count": n, "errors": [], "items": []}
 
-    def list_libraries(self):
-        return list(self.libraries.values())
+    def list_tool_sets(self):
+        return list(self.tool_sets.values())
 
-    def create_libraries(self, items):
+    def create_tool_sets(self, items):
         out = []
         for item in items:
             lid = self._next("lib")
-            self.libraries[lid] = {**item, "id": lid, "version": 1}
-            out.append(self.libraries[lid])
+            self.tool_sets[lid] = {**item, "id": lid, "version": 1}
+            out.append(self.tool_sets[lid])
         return {"success_count": len(out), "errors": [], "items": out}
 
-    def update_libraries(self, items):
+    def update_tool_sets(self, items):
         out, errors = [], []
         for i, item in enumerate(items):
-            current = self.libraries.get(item["id"])
+            current = self.tool_sets.get(item["id"])
             if current is None:
                 errors.append({"index": i, "message": "not found"})
                 continue

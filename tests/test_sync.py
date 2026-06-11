@@ -34,9 +34,9 @@ def test_first_export_creates_and_writes_back_ids(tools_dir):
     drill = json.loads((tools_dir / "Bit" / "drill_5.0mm.fctb").read_text())
     assert drill["smooth"]["record_id"] in server.records
     fctl = json.loads((tools_dir / "Library" / "default.fctl").read_text())
-    assert fctl["smooth"]["library_id"] in server.libraries
+    assert fctl["smooth"]["tool_set_id"] in server.tool_sets
 
-    library = server.libraries[fctl["smooth"]["library_id"]]
+    library = server.tool_sets[fctl["smooth"]["tool_set_id"]]
     assert len(library["tool_record_ids"]) == 2
     assert library["extra"]["freecad"]["numbers"][library["tool_record_ids"][0]] == 1
 
@@ -51,7 +51,7 @@ def test_reexport_updates_never_duplicates(tools_dir):
     third = sync.export_tools(str(tools_dir), server)
 
     assert len(server.records) == 3
-    assert len(server.libraries) == 1
+    assert len(server.tool_sets) == 1
     assert second["created"] == 0 and second["updated"] == 4
     assert third["created"] == 0 and third["updated"] == 4
 
@@ -112,7 +112,7 @@ def test_library_member_without_record_is_reported(tools_dir):
     summary = sync.export_tools(str(tools_dir), server)
     assert any("ghost.fctb" in e for e in summary["errors"])
     # library still created with the resolvable members
-    library = list(server.libraries.values())[0]
+    library = list(server.tool_sets.values())[0]
     assert len(library["tool_record_ids"]) == 2
 
 

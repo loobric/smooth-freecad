@@ -45,7 +45,7 @@ def test_plan_is_pure_and_classifies_fresh_state(tools_dir):
     }
     # nothing was touched, client saw no writes
     assert {p.name: p.read_text() for p in (tools_dir / "Bit").glob("*")} == before
-    assert server.records == {} and server.libraries == {}
+    assert server.records == {} and server.tool_sets == {}
     # membership info present
     drill = plan_by_key(plan)["bit:drill_5.0mm.fctb"]
     assert drill["library"] == "default.fctl"
@@ -205,7 +205,7 @@ def test_library_detail_shows_membership_delta(tools_dir):
     plan = sync.plan_sync(str(tools_dir), server)
     sync.apply_sync(str(tools_dir), server, plan,
                     {i["key"]: "push" for i in plan["items"]})
-    library = list(server.libraries.values())[0]
+    library = list(server.tool_sets.values())[0]
     probe_rid = read(tools_dir / "Bit" / "probe.fctb")["smooth"]["record_id"]
     library["tool_record_ids"] = library["tool_record_ids"] + [probe_rid]
     library["version"] += 1
@@ -270,7 +270,7 @@ def test_local_member_removal_pushes_and_reports_neutrally(tools_dir):
 
     sync.apply_sync(str(tools_dir), server, {"items": [item], "errors": []},
                     {"lib:default.fctl": "push"})
-    library = list(server.libraries.values())[0]
+    library = list(server.tool_sets.values())[0]
     assert len(library["tool_record_ids"]) == 1  # removal reached the server
 
 
@@ -348,7 +348,7 @@ def test_editor_wiped_fctl_key_readopts_no_duplicate_library(tools_dir):
     plan = sync.plan_sync(str(tools_dir), server)
     sync.apply_sync(str(tools_dir), server, plan,
                     {i["key"]: "push" for i in plan["items"]})
-    assert len(server.libraries) == 1
+    assert len(server.tool_sets) == 1
 
     # simulate the library editor: rewrite without the smooth key + an edit
     fctl_path = tools_dir / "Library" / "default.fctl"
@@ -363,6 +363,45 @@ def test_editor_wiped_fctl_key_readopts_no_duplicate_library(tools_dir):
                               sync.plan_sync(str(tools_dir), server),
                               {"lib:default.fctl": "push"})
     assert summary["errors"] == []
-    assert len(server.libraries) == 1        # NO duplicate
-    assert len(list(server.libraries.values())[0]["tool_record_ids"]) == 1
+    assert len(server.tool_sets) == 1        # NO duplicate
+    assert len(list(server.tool_sets.values())[0]["tool_record_ids"]) == 1
     assert "smooth" in read(fctl_path)       # identity restored
+
+
+@pytest.mark.unit
+def test_legacy_library_id_key_and_journal_still_match(tools_dir):
+    """Back-compat for the 2026-06-11 nomenclature purge: files written
+    before it spell the identity key 'library_id' and the journal bucket
+    'libraries'. Both must keep matching - no duplicate tool set - and
+    the next writeback upgrades the spelling."""
+    server = FakeServer()
+    plan = sync.plan_sync(str(tools_dir), server)
+    sync.apply_sync(str(tools_dir), server, plan,
+                    {i["key"]: "push" for i in plan["items"]})
+    assert len(server.tool_sets) == 1
+    set_id = list(server.tool_sets)[0]
+
+    # rewrite the .fctl identity in the legacy spelling
+    fctl_path = tools_dir / "Library" / "default.fctl"
+    doc = read(fctl_path)
+    version = doc["smooth"]["version"]
+    doc["smooth"] = {"library_id": set_id, "version": version}
+    fctl_path.write_text(json.dumps(doc))
+    # and the journal in the legacy bucket name
+    state_path = tools_dir / ".smooth_state.json"
+    state = json.loads(state_path.read_text())
+    state["libraries"] = state.pop("tool_sets")
+    state_path.write_text(json.dumps(state))
+
+    item = plan_by_key(sync.plan_sync(str(tools_dir), server))["lib:default.fctl"]
+    assert item["action"] == "unchanged"     # matched via legacy key
+
+    # an edit pushes as an update (never a duplicate) and upgrades the key
+    doc["tools"] = doc["tools"][:1]
+    fctl_path.write_text(json.dumps(doc))
+    sync.apply_sync(str(tools_dir), server,
+                    sync.plan_sync(str(tools_dir), server),
+                    {"lib:default.fctl": "push"})
+    assert len(server.tool_sets) == 1        # NO duplicate
+    assert read(fctl_path)["smooth"].get("tool_set_id") == set_id
+    assert "tool_sets" in json.loads(state_path.read_text())

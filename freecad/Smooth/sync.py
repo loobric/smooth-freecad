@@ -42,6 +42,14 @@ def _writeback_identity(path, key, server_id, version):
     _write_json(path, doc)
 
 
+def _local_tool_set_id(doc):
+    """Server ToolSet id from a .fctl's smooth key. Files written before
+    the 2026-06-11 nomenclature purge spell it 'library_id'; both are
+    honored on read, and the next writeback upgrades the spelling."""
+    meta = doc.get("smooth") or {}
+    return meta.get("tool_set_id") or meta.get("library_id")
+
+
 def scan_tools_dir(tools_dir):
     """Find bit and library files under a FreeCAD Tools directory.
 
@@ -156,7 +164,7 @@ def export_tools(tools_dir, client, log=lambda msg: None):
                 summary["record_id_by_path"][basename] = prior_id
 
     # --- libraries ------------------------------------------------------------
-    server_libraries = {l["id"]: l for l in client.list_libraries()}
+    server_tool_sets = {l["id"]: l for l in client.list_tool_sets()}
     for path in lib_paths:
         basename = os.path.basename(path)
         try:
@@ -164,7 +172,7 @@ def export_tools(tools_dir, client, log=lambda msg: None):
         except (OSError, ValueError) as e:
             summary["errors"].append("%s: unreadable (%s)" % (basename, e))
             continue
-        payload, unresolved, prior_id = mapping.fctl_to_library(
+        payload, unresolved, prior_id = mapping.fctl_to_tool_set(
             doc, summary["record_id_by_path"]
         )
         payload["extra"]["freecad"]["filename"] = basename
@@ -174,21 +182,21 @@ def export_tools(tools_dir, client, log=lambda msg: None):
                 % (basename, missing)
             )
 
-        if not prior_id or prior_id not in server_libraries:
-            prior_id = _readopt_library(
-                basename, server_libraries, _load_sync_state(tools_dir), log
+        if not prior_id or prior_id not in server_tool_sets:
+            prior_id = _readopt_tool_set(
+                basename, server_tool_sets, _load_sync_state(tools_dir), log
             ) or prior_id
 
-        if prior_id and prior_id in server_libraries:
-            current = server_libraries[prior_id]
-            result = client.update_libraries([{
+        if prior_id and prior_id in server_tool_sets:
+            current = server_tool_sets[prior_id]
+            result = client.update_tool_sets([{
                 "id": prior_id, "version": current["version"], **payload
             }])
             action = "updated"
         else:
             if prior_id:
                 log("%s: server library %s gone; recreating" % (basename, prior_id))
-            result = client.create_libraries([payload])
+            result = client.create_tool_sets([payload])
             action = "created"
 
         for error in result.get("errors", []):
@@ -196,10 +204,10 @@ def export_tools(tools_dir, client, log=lambda msg: None):
         items = result.get("items", [])
         if not items:
             continue
-        library = items[0]
+        tool_set = items[0]
         summary[action] += 1
-        _writeback_identity(path, "library_id", library["id"], library["version"])
-        log("%s %s -> %s" % (action, basename, library["id"][:8]))
+        _writeback_identity(path, "tool_set_id", tool_set["id"], tool_set["version"])
+        log("%s %s -> %s" % (action, basename, tool_set["id"][:8]))
 
     return summary
 
@@ -322,25 +330,25 @@ def import_tools(tools_dir, client, log=lambda msg: None):
             doc = _read_json(path)
         except (OSError, ValueError):
             continue
-        lid = (doc.get("smooth") or {}).get("library_id")
+        lid = _local_tool_set_id(doc)
         if lid:
             local_lib_by_id[lid] = path
 
-    for library in client.list_libraries():
-        meta = (library.get("extra") or {}).get("freecad", {})
+    for tool_set in client.list_tool_sets():
+        meta = (tool_set.get("extra") or {}).get("freecad", {})
         base = meta.get("fctl")
-        regenerated, unresolved = mapping.library_to_fctl(library, path_by_record_id)
+        regenerated, unresolved = mapping.tool_set_to_fctl(tool_set, path_by_record_id)
         for rid in unresolved:
             summary["errors"].append(
-                "library '%s': member %s has no local file" % (library.get("name"), rid)
+                "library '%s': member %s has no local file" % (tool_set.get("name"), rid)
             )
-        path = local_lib_by_id.get(library["id"])
+        path = local_lib_by_id.get(tool_set["id"])
 
         if not path:
-            stem = _slug(library.get("name", "library"))
+            stem = _slug(tool_set.get("name", "library"))
             path = os.path.join(lib_dir, stem + ".fctl")
             if os.path.exists(path):
-                path = os.path.join(lib_dir, "%s_%s.fctl" % (stem, library["id"][:8]))
+                path = os.path.join(lib_dir, "%s_%s.fctl" % (stem, tool_set["id"][:8]))
             _write_json(path, regenerated)
             summary["written"] += 1
             log("new from server: %s" % os.path.basename(path))
@@ -357,8 +365,9 @@ def import_tools(tools_dir, client, log=lambda msg: None):
         regen_doc = _sans_smooth(regenerated)
         if local_doc == regen_doc:
             summary["unchanged"] += 1
-            if (local.get("smooth") or {}).get("version") != library.get("version"):
-                _writeback_identity(path, "library_id", library["id"], library["version"])
+            if (local.get("smooth") or {}).get("version") != tool_set.get("version"):
+                _writeback_identity(path, "tool_set_id", tool_set["id"],
+                                    tool_set["version"])
             continue
         if base is not None and local_doc == _sans_smooth(base):
             _write_json(path, regenerated)
@@ -475,19 +484,19 @@ def _membership_delta(local_doc, regenerated):
 STATE_BASENAME = ".smooth_state.json"
 
 
-def _readopt_library(basename, server_libraries, state, log=lambda m: None):
+def _readopt_tool_set(basename, server_tool_sets, state, log=lambda m: None):
     """Deterministic library re-adoption when the .fctl identity key is
     missing/stale (FreeCAD's library editor drops unknown keys on save,
     same as the ToolBit editor). Journal first, then the filename the
     server recorded at export. NEVER by name.
     """
-    for lid, recorded in (state.get("libraries") or {}).items():
-        if recorded == basename and lid in server_libraries:
+    for lid, recorded in (state.get("tool_sets") or {}).items():
+        if recorded == basename and lid in server_tool_sets:
             log("%s: identity key missing (editor save?); re-adopted from "
                 "sync journal" % basename)
             return lid
     matches = [
-        lid for lid, lib in server_libraries.items()
+        lid for lid, lib in server_tool_sets.items()
         if ((lib.get("extra") or {}).get("freecad", {})).get("filename") == basename
     ]
     if len(matches) == 1:
@@ -506,7 +515,10 @@ def _load_sync_state(tools_dir):
     except (OSError, ValueError):
         state = {}
     state.setdefault("records", {})
-    state.setdefault("libraries", {})
+    if "tool_sets" not in state and "libraries" in state:
+        # journal written before the 2026-06-11 nomenclature purge
+        state["tool_sets"] = state.pop("libraries")
+    state.setdefault("tool_sets", {})
     return state
 
 
@@ -536,9 +548,9 @@ def plan_sync(tools_dir, client):
     state = _load_sync_state(tools_dir)
     bit_paths, lib_paths = scan_tools_dir(tools_dir)
     server_records = client.list_records()
-    server_libraries = client.list_libraries()
+    server_tool_sets = client.list_tool_sets()
     server_record_ids = {r["id"] for r in server_records}
-    server_library_ids = {l["id"] for l in server_libraries}
+    server_tool_set_ids = {l["id"] for l in server_tool_sets}
 
     by_record_id, by_fctb_id, by_filename = {}, {}, {}
     local_docs = {}
@@ -644,39 +656,39 @@ def plan_sync(tools_dir, client):
             })
 
     # libraries
-    server_libs_by_id = {l["id"]: l for l in server_libraries}
+    server_tool_sets_by_id = {l["id"]: l for l in server_tool_sets}
     lib_by_id = {}
     for lpath, ldoc in local_lib_docs.items():
-        lid = (ldoc.get("smooth") or {}).get("library_id")
-        if not lid or lid not in server_libs_by_id:
-            lid = _readopt_library(os.path.basename(lpath),
-                                   server_libs_by_id, state) or lid
+        lid = _local_tool_set_id(ldoc)
+        if not lid or lid not in server_tool_sets_by_id:
+            lid = _readopt_tool_set(os.path.basename(lpath),
+                                    server_tool_sets_by_id, state) or lid
         if lid:
             lib_by_id[lid] = lpath
     matched_libs = set()
-    for library in server_libraries:
-        lpath = lib_by_id.get(library["id"])
+    for tool_set in server_tool_sets:
+        lpath = lib_by_id.get(tool_set["id"])
         if not lpath or lpath not in local_lib_docs:
-            if library["id"] in state["libraries"]:
+            if tool_set["id"] in state["tool_sets"]:
                 items.append({
-                    "key": "server-lib:%s" % library["id"], "kind": "library",
-                    "name": library.get("name", "?"), "path": None,
+                    "key": "server-lib:%s" % tool_set["id"], "kind": "library",
+                    "name": tool_set.get("name", "?"), "path": None,
                     "basename": None, "action": "deleted_local",
                     "detail": "the library file was deleted here - propagate "
                               "or restore", "library": None,
-                    "record": library, "diff": [],
+                    "record": tool_set, "diff": [],
                 })
             else:
                 items.append({
-                    "key": "server-lib:%s" % library["id"], "kind": "library",
-                    "name": library.get("name", "?"), "path": None,
+                    "key": "server-lib:%s" % tool_set["id"], "kind": "library",
+                    "name": tool_set.get("name", "?"), "path": None,
                     "basename": None, "action": "new_server",
                     "detail": "library exists on the server only",
-                    "library": None, "record": library, "diff": [],
+                    "library": None, "record": tool_set, "diff": [],
                 })
             continue
         matched_libs.add(lpath)
-        base = (library.get("extra") or {}).get("freecad", {}).get("fctl")
+        base = (tool_set.get("extra") or {}).get("freecad", {}).get("fctl")
         # membership resolution uses local filenames where known
         path_map = {}
         for record in server_records:
@@ -685,7 +697,7 @@ def plan_sync(tools_dir, client):
                      or (meta.get("filename") and by_filename.get(meta["filename"])))
             path_map[record["id"]] = os.path.basename(rpath) if rpath \
                 else (meta.get("filename") or record["id"][:8] + ".fctb")
-        regenerated, _ = mapping.library_to_fctl(library, path_map)
+        regenerated, _ = mapping.tool_set_to_fctl(tool_set, path_map)
         action = _classify(local_lib_docs[lpath], base, regenerated)
         basename = os.path.basename(lpath)
         detail = {
@@ -703,7 +715,7 @@ def plan_sync(tools_dir, client):
             "name": local_lib_docs[lpath].get("label") or basename,
             "path": lpath, "basename": basename, "action": action,
             "detail": detail,
-            "library": None, "record": library,
+            "library": None, "record": tool_set,
             "diff": diff_docs(local_lib_docs[lpath], base, regenerated)
                     if action != "unchanged" else [],
         })
@@ -711,9 +723,9 @@ def plan_sync(tools_dir, client):
         if lpath in matched_libs:
             continue
         basename = os.path.basename(lpath)
-        lid = (ldoc.get("smooth") or {}).get("library_id")
+        lid = _local_tool_set_id(ldoc)
         action = "deleted_server" if (
-            lid and lid in state["libraries"] and lid not in server_library_ids
+            lid and lid in state["tool_sets"] and lid not in server_tool_set_ids
         ) else "new_local"
         items.append({
             "key": "lib:%s" % basename, "kind": "library",
@@ -812,30 +824,30 @@ def apply_sync(tools_dir, client, plan, decisions, log=lambda msg: None):
 
     def push_library(item):
         doc = _read_json(item["path"])
-        payload, unresolved, _ = mapping.fctl_to_library(doc, record_id_by_path)
+        payload, unresolved, _ = mapping.fctl_to_tool_set(doc, record_id_by_path)
         payload["extra"]["freecad"]["filename"] = item["basename"]
         for missing in unresolved:
             summary["errors"].append(
                 "%s: member %s has no server record - upload it first"
                 % (item["basename"], missing))
         if item["record"]:
-            result = client.update_libraries([{
+            result = client.update_tool_sets([{
                 "id": item["record"]["id"],
                 "version": item["record"]["version"], **payload}])
         else:
-            result = client.create_libraries([payload])
+            result = client.create_tool_sets([payload])
         for error in result.get("errors", []):
             summary["errors"].append("%s: %s" % (item["basename"], error.get("message")))
         if result.get("items"):
             lib = result["items"][0]
-            _writeback_identity(item["path"], "library_id", lib["id"], lib["version"])
-            state["libraries"][lib["id"]] = item["basename"]
+            _writeback_identity(item["path"], "tool_set_id", lib["id"], lib["version"])
+            state["tool_sets"][lib["id"]] = item["basename"]
             summary["pushed"] += 1
             log("uploaded %s" % item["basename"])
 
     def pull_library(item):
         path_map = {rid: name for name, rid in record_id_by_path.items()}
-        regenerated, unresolved = mapping.library_to_fctl(item["record"], path_map)
+        regenerated, unresolved = mapping.tool_set_to_fctl(item["record"], path_map)
         for rid in unresolved:
             summary["errors"].append(
                 "%s: member %s has no local file - download it first"
@@ -843,7 +855,7 @@ def apply_sync(tools_dir, client, plan, decisions, log=lambda msg: None):
         path = item["path"] or os.path.join(
             lib_dir, _slug(item["record"].get("name", "library")) + ".fctl")
         _write_json(path, regenerated)
-        state["libraries"][item["record"]["id"]] = os.path.basename(path)
+        state["tool_sets"][item["record"]["id"]] = os.path.basename(path)
         summary["pulled"] += 1
         log("downloaded %s" % os.path.basename(path))
 
@@ -862,8 +874,8 @@ def apply_sync(tools_dir, client, plan, decisions, log=lambda msg: None):
                     client.delete_records([item["record"]["id"]])
                     state["records"].pop(item["record"]["id"], None)
                 else:
-                    client.delete_libraries([item["record"]["id"]])
-                    state["libraries"].pop(item["record"]["id"], None)
+                    client.delete_tool_sets([item["record"]["id"]])
+                    state["tool_sets"].pop(item["record"]["id"], None)
                 summary["deleted"] += 1
                 log("deleted on server: %s" % item["name"])
             elif item["action"] == "deleted_server" and decision == "pull":
@@ -873,7 +885,7 @@ def apply_sync(tools_dir, client, plan, decisions, log=lambda msg: None):
                     state["records"] = {k: v for k, v in state["records"].items()
                                         if v != item["basename"]}
                 else:
-                    state["libraries"] = {k: v for k, v in state["libraries"].items()
+                    state["tool_sets"] = {k: v for k, v in state["tool_sets"].items()
                                           if v != item["basename"]}
                 summary["deleted"] += 1
                 log("deleted local file: %s" % item["basename"])
@@ -893,7 +905,7 @@ def apply_sync(tools_dir, client, plan, decisions, log=lambda msg: None):
     # backfill the journal with everything currently matched, then persist
     for item in plan["items"]:
         if item["path"] and item["record"]:
-            bucket = "records" if item["kind"] == "bit" else "libraries"
+            bucket = "records" if item["kind"] == "bit" else "tool_sets"
             state[bucket][item["record"]["id"]] = item["basename"]
     _save_sync_state(tools_dir, state)
     return summary
