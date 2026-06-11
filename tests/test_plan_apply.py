@@ -213,3 +213,37 @@ def test_library_detail_shows_membership_delta(tools_dir):
     item = plan_by_key(sync.plan_sync(str(tools_dir), server))["lib:default.fctl"]
     assert item["action"] == "pull"
     assert "server adds: probe.fctb" in item["detail"]
+
+
+@pytest.mark.unit
+def test_editor_reformat_is_not_a_change(tools_dir):
+    """Field finding: FreeCAD's ToolBit editor rewrites quantity formatting
+    on every save ('6.0000 mm' -> '6.00 mm'). Semantically identical files
+    must classify 'unchanged' and produce no diff noise; a single real edit
+    must yield exactly one diff line."""
+    server = FakeServer()
+    plan = sync.plan_sync(str(tools_dir), server)
+    sync.apply_sync(str(tools_dir), server, plan,
+                    {i["key"]: "push" for i in plan["items"]})
+
+    # simulate the editor: reformat every quantity, drop the smooth key,
+    # but change nothing semantically
+    p = tools_dir / "Bit" / "end_mill_6.0mm_2f.fctb"
+    doc = read(p)
+    smooth_key = doc.pop("smooth")
+    for k, v in list(doc["parameter"].items()):
+        if isinstance(v, str) and v.endswith(" mm"):
+            doc["parameter"][k] = "%.4f mm" % float(v.split()[0])
+    doc["smooth"] = smooth_key
+    p.write_text(json.dumps(doc))
+
+    item = plan_by_key(sync.plan_sync(str(tools_dir), server))["bit:end_mill_6.0mm_2f.fctb"]
+    assert item["action"] == "unchanged", item["diff"]
+
+    # now ONE real edit on top of the reformat
+    doc["name"] = "renamed"
+    p.write_text(json.dumps(doc))
+    item = plan_by_key(sync.plan_sync(str(tools_dir), server))["bit:end_mill_6.0mm_2f.fctb"]
+    assert item["action"] == "push"
+    assert len(item["diff"]) == 1
+    assert item["diff"][0]["field"] == "name"

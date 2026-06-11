@@ -374,23 +374,42 @@ def import_tools(tools_dir, client, log=lambda msg: None):
 # Plan / Apply (smooth-freecad#7): preview-first sync with per-item control
 # ---------------------------------------------------------------------------
 
+def _semantic(doc):
+    """Canonical flat form of a document for semantic equality."""
+    return {k: _canonical_value(v) for k, v in _flatten(doc).items()}
+
+
 def _classify(local_doc, base, regenerated):
     """3-way classification of one file (shared by import and the planner).
+
+    Comparison is SEMANTIC: quantity formatting churn from FreeCAD's
+    editor ('6.0000 mm' -> '6.00 mm') does not count as change.
 
     Returns one of: "unchanged", "pull" (server changed), "push" (local
     changed), "conflict" (both changed).
     """
-    local_cmp = _sans_smooth(local_doc)
-    regen_cmp = _sans_smooth(regenerated)
+    local_cmp = _semantic(local_doc)
+    regen_cmp = _semantic(regenerated)
     if local_cmp == regen_cmp:
         return "unchanged"
-    if base is not None and local_cmp == _sans_smooth(base):
+    if base is not None and local_cmp == _semantic(base):
         return "pull"
-    if base is not None and regen_cmp == _sans_smooth(base):
+    if base is not None and regen_cmp == _semantic(base):
         return "push"
     return "conflict"
 
 
+
+
+def _canonical_value(value):
+    """Normalize a leaf for SEMANTIC comparison: quantity strings compare
+    by (value, unit) so '6.00 mm' == '6.0000 mm' (FreeCAD's ToolBit editor
+    reformats quantities on every save - field finding 2026-06-11)."""
+    if isinstance(value, str):
+        number, unit = mapping.parse_quantity(value)
+        if number is not None:
+            return (number, unit)
+    return value
 
 
 def _flatten(doc, prefix=""):
@@ -418,12 +437,13 @@ def diff_docs(local, base, regenerated):
     diffs = []
     for field in sorted(set(lf) | set(rf)):
         lv, rv = lf.get(field), rf.get(field)
-        if lv == rv:
-            continue
-        bv = bf.get(field)
-        if lv != bv and rv != bv:
+        clv, crv = _canonical_value(lv), _canonical_value(rv)
+        if clv == crv:
+            continue  # formatting-only difference: not a change
+        cbv = _canonical_value(bf.get(field))
+        if clv != cbv and crv != cbv:
             changed_by = "both"
-        elif lv != bv:
+        elif clv != cbv:
             changed_by = "local"
         else:
             changed_by = "server"
