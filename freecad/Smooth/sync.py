@@ -368,3 +368,318 @@ def import_tools(tools_dir, client, log=lambda msg: None):
         )
 
     return summary
+
+
+# ---------------------------------------------------------------------------
+# Plan / Apply (smooth-freecad#7): preview-first sync with per-item control
+# ---------------------------------------------------------------------------
+
+def _classify(local_doc, base, regenerated):
+    """3-way classification of one file (shared by import and the planner).
+
+    Returns one of: "unchanged", "pull" (server changed), "push" (local
+    changed), "conflict" (both changed).
+    """
+    local_cmp = _sans_smooth(local_doc)
+    regen_cmp = _sans_smooth(regenerated)
+    if local_cmp == regen_cmp:
+        return "unchanged"
+    if base is not None and local_cmp == _sans_smooth(base):
+        return "pull"
+    if base is not None and regen_cmp == _sans_smooth(base):
+        return "push"
+    return "conflict"
+
+
+def plan_sync(tools_dir, client):
+    """Compute the sync plan without touching anything.
+
+    Returns {"items": [...], "errors": [...]}; each item:
+        {"key": str,                # stable handle for apply decisions
+         "kind": "bit"|"library",
+         "name": str, "path": str|None, "basename": str|None,
+         "action": "unchanged"|"push"|"pull"|"new_local"|"new_server"
+                   |"conflict",
+         "detail": str,
+         "library": str|None,       # owning .fctl basename for bits
+         "record": dict|None}       # server object when one exists
+    """
+    items = []
+    errors = []
+    bit_paths, lib_paths = scan_tools_dir(tools_dir)
+    server_records = client.list_records()
+    server_libraries = client.list_libraries()
+
+    by_record_id, by_fctb_id, by_filename = {}, {}, {}
+    local_docs = {}
+    for path in bit_paths:
+        basename = os.path.basename(path)
+        try:
+            doc = _read_json(path)
+        except (OSError, ValueError) as e:
+            errors.append("%s: unreadable (%s)" % (basename, e))
+            continue
+        local_docs[path] = doc
+        rid = (doc.get("smooth") or {}).get("record_id")
+        if rid:
+            by_record_id[rid] = path
+        if doc.get("id"):
+            by_fctb_id.setdefault(doc["id"], path)
+        by_filename[basename] = path
+
+    # bit membership: basename -> owning library basename (first wins)
+    member_of = {}
+    local_lib_docs = {}
+    for lpath in lib_paths:
+        try:
+            ldoc = _read_json(lpath)
+        except (OSError, ValueError) as e:
+            errors.append("%s: unreadable (%s)" % (os.path.basename(lpath), e))
+            continue
+        local_lib_docs[lpath] = ldoc
+        for tool in ldoc.get("tools", []) or []:
+            member_of.setdefault(tool.get("path"), os.path.basename(lpath))
+
+    matched_paths = set()
+    for record in server_records:
+        meta = (record.get("extra") or {}).get("freecad", {})
+        base = meta.get("fctb")
+        fctb_id = (base or {}).get("id")
+        path = (by_record_id.get(record["id"])
+                or (fctb_id and by_fctb_id.get(fctb_id))
+                or (meta.get("filename") and by_filename.get(meta["filename"])))
+        if not path or path not in local_docs:
+            items.append({
+                "key": "server:%s" % record["id"], "kind": "bit",
+                "name": record.get("name", "?"), "path": None,
+                "basename": meta.get("filename"),
+                "action": "new_server",
+                "detail": "exists on the server only - import creates the file",
+                "library": None, "record": record,
+            })
+            continue
+        matched_paths.add(path)
+        action = _classify(local_docs[path], base, mapping.record_to_fctb(record))
+        detail = {
+            "unchanged": "in sync",
+            "pull": "changed on the server - apply downloads it",
+            "push": "changed locally - apply uploads it",
+            "conflict": "changed on BOTH sides - choose a side below",
+        }[action]
+        basename = os.path.basename(path)
+        items.append({
+            "key": "bit:%s" % basename, "kind": "bit",
+            "name": local_docs[path].get("name") or basename,
+            "path": path, "basename": basename, "action": action,
+            "detail": detail, "library": member_of.get(basename),
+            "record": record,
+        })
+
+    for path, doc in local_docs.items():
+        if path in matched_paths:
+            continue
+        basename = os.path.basename(path)
+        items.append({
+            "key": "bit:%s" % basename, "kind": "bit",
+            "name": doc.get("name") or basename,
+            "path": path, "basename": basename, "action": "new_local",
+            "detail": "not on the server yet - apply uploads it",
+            "library": member_of.get(basename), "record": None,
+        })
+
+    # libraries
+    lib_by_id = {}
+    for lpath, ldoc in local_lib_docs.items():
+        lid = (ldoc.get("smooth") or {}).get("library_id")
+        if lid:
+            lib_by_id[lid] = lpath
+    matched_libs = set()
+    for library in server_libraries:
+        lpath = lib_by_id.get(library["id"])
+        if not lpath or lpath not in local_lib_docs:
+            items.append({
+                "key": "server-lib:%s" % library["id"], "kind": "library",
+                "name": library.get("name", "?"), "path": None,
+                "basename": None, "action": "new_server",
+                "detail": "library exists on the server only",
+                "library": None, "record": library,
+            })
+            continue
+        matched_libs.add(lpath)
+        base = (library.get("extra") or {}).get("freecad", {}).get("fctl")
+        # membership resolution uses local filenames where known
+        path_map = {}
+        for record in server_records:
+            meta = (record.get("extra") or {}).get("freecad", {})
+            rpath = (by_record_id.get(record["id"])
+                     or (meta.get("filename") and by_filename.get(meta["filename"])))
+            path_map[record["id"]] = os.path.basename(rpath) if rpath \
+                else (meta.get("filename") or record["id"][:8] + ".fctb")
+        regenerated, _ = mapping.library_to_fctl(library, path_map)
+        action = _classify(local_lib_docs[lpath], base, regenerated)
+        basename = os.path.basename(lpath)
+        items.append({
+            "key": "lib:%s" % basename, "kind": "library",
+            "name": local_lib_docs[lpath].get("label") or basename,
+            "path": lpath, "basename": basename, "action": action,
+            "detail": {
+                "unchanged": "in sync",
+                "pull": "membership/label changed on the server",
+                "push": "changed locally - apply uploads it",
+                "conflict": "changed on BOTH sides - choose a side below",
+            }[action],
+            "library": None, "record": library,
+        })
+    for lpath, ldoc in local_lib_docs.items():
+        if lpath in matched_libs:
+            continue
+        basename = os.path.basename(lpath)
+        items.append({
+            "key": "lib:%s" % basename, "kind": "library",
+            "name": ldoc.get("label") or basename,
+            "path": lpath, "basename": basename, "action": "new_local",
+            "detail": "not on the server yet - apply uploads it",
+            "library": None, "record": None,
+        })
+
+    return {"items": items, "errors": errors}
+
+
+class SyncApplyError(Exception):
+    """Apply-time failure for one item (others proceed)."""
+
+
+def apply_sync(tools_dir, client, plan, decisions, log=lambda msg: None):
+    """Execute selected plan items.
+
+    Args:
+        plan: result of plan_sync (recompute after any apply)
+        decisions: {item_key: decision}; absent/"skip" items untouched.
+            For push/pull/new_local/new_server: "apply".
+            For conflict: "keep_local" (upload) or "take_server" (download).
+
+    Returns {"pushed": n, "pulled": n, "skipped": n, "errors": [...]}.
+
+    Assumptions:
+    - keep_local force-uploads using the server's CURRENT version (an
+      explicit human decision, so overruling the server copy is correct)
+    - take_server rewrites the local file from the server record
+    - library uploads re-resolve membership from local files at apply time
+    """
+    summary = {"pushed": 0, "pulled": 0, "skipped": 0, "errors": []}
+    by_key = {i["key"]: i for i in plan["items"]}
+    bit_dir = os.path.join(tools_dir, "Bit")
+    lib_dir = os.path.join(tools_dir, "Library")
+    os.makedirs(bit_dir, exist_ok=True)
+    os.makedirs(lib_dir, exist_ok=True)
+
+    # local record ids for library membership resolution
+    record_id_by_path = {}
+    for path in scan_tools_dir(tools_dir)[0]:
+        try:
+            doc = _read_json(path)
+        except (OSError, ValueError):
+            continue
+        rid = (doc.get("smooth") or {}).get("record_id")
+        if rid:
+            record_id_by_path[os.path.basename(path)] = rid
+
+    def push_bit(item, force=False):
+        doc = _read_json(item["path"])
+        payload, _ = mapping.fctb_to_record(doc)
+        payload["extra"]["freecad"]["filename"] = item["basename"]
+        if item["record"]:
+            result = client.update_records([{
+                "id": item["record"]["id"],
+                "version": item["record"]["version"], **payload}])
+        else:
+            result = client.create_records([payload])
+        for error in result.get("errors", []):
+            summary["errors"].append("%s: %s" % (item["basename"], error.get("message")))
+        if result.get("items"):
+            rec = result["items"][0]
+            _writeback_identity(item["path"], "record_id", rec["id"], rec["version"])
+            record_id_by_path[item["basename"]] = rec["id"]
+            summary["pushed"] += 1
+            log("uploaded %s" % item["basename"])
+
+    def pull_bit(item):
+        regenerated = mapping.record_to_fctb(item["record"])
+        path = item["path"]
+        if not path:
+            meta = (item["record"].get("extra") or {}).get("freecad", {})
+            stem = (meta.get("filename") or "").rsplit(".fctb", 1)[0] \
+                or _slug(item["record"].get("name", "tool"))
+            path = os.path.join(bit_dir, stem + ".fctb")
+            if os.path.exists(path):
+                path = os.path.join(bit_dir, "%s_%s.fctb"
+                                    % (stem, item["record"]["id"][:8]))
+        _write_json(path, regenerated)
+        record_id_by_path[os.path.basename(path)] = item["record"]["id"]
+        summary["pulled"] += 1
+        log("downloaded %s" % os.path.basename(path))
+
+    def push_library(item):
+        doc = _read_json(item["path"])
+        payload, unresolved, _ = mapping.fctl_to_library(doc, record_id_by_path)
+        for missing in unresolved:
+            summary["errors"].append(
+                "%s: member %s has no server record - upload it first"
+                % (item["basename"], missing))
+        if item["record"]:
+            result = client.update_libraries([{
+                "id": item["record"]["id"],
+                "version": item["record"]["version"], **payload}])
+        else:
+            result = client.create_libraries([payload])
+        for error in result.get("errors", []):
+            summary["errors"].append("%s: %s" % (item["basename"], error.get("message")))
+        if result.get("items"):
+            lib = result["items"][0]
+            _writeback_identity(item["path"], "library_id", lib["id"], lib["version"])
+            summary["pushed"] += 1
+            log("uploaded %s" % item["basename"])
+
+    def pull_library(item):
+        path_map = {rid: name for name, rid in record_id_by_path.items()}
+        regenerated, unresolved = mapping.library_to_fctl(item["record"], path_map)
+        for rid in unresolved:
+            summary["errors"].append(
+                "%s: member %s has no local file - download it first"
+                % (item["name"], rid))
+        path = item["path"] or os.path.join(
+            lib_dir, _slug(item["record"].get("name", "library")) + ".fctl")
+        _write_json(path, regenerated)
+        summary["pulled"] += 1
+        log("downloaded %s" % os.path.basename(path))
+
+    # bits before libraries so membership resolves
+    ordered = sorted(plan["items"], key=lambda i: 0 if i["kind"] == "bit" else 1)
+    for item in ordered:
+        decision = decisions.get(item["key"], "skip")
+        if decision == "skip" or item["action"] == "unchanged":
+            if decision == "skip" and item["action"] != "unchanged":
+                summary["skipped"] += 1
+            continue
+        try:
+            if item["kind"] == "bit":
+                if item["action"] in ("push", "new_local") and decision == "apply":
+                    push_bit(item)
+                elif item["action"] in ("pull", "new_server") and decision == "apply":
+                    pull_bit(item)
+                elif item["action"] == "conflict" and decision == "keep_local":
+                    push_bit(item, force=True)
+                elif item["action"] == "conflict" and decision == "take_server":
+                    pull_bit(item)
+            else:
+                if item["action"] in ("push", "new_local") and decision == "apply":
+                    push_library(item)
+                elif item["action"] in ("pull", "new_server") and decision == "apply":
+                    pull_library(item)
+                elif item["action"] == "conflict" and decision == "keep_local":
+                    push_library(item)
+                elif item["action"] == "conflict" and decision == "take_server":
+                    pull_library(item)
+        except SyncApplyError as e:
+            summary["errors"].append(str(e))
+    return summary
