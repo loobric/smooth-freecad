@@ -336,3 +336,33 @@ def test_deleted_on_server_does_not_reupload_silently(tools_dir):
                               {"bit:probe.fctb": "pull"})
     assert summary["deleted"] == 1
     assert not (tools_dir / "Bit" / "probe.fctb").exists()
+
+
+@pytest.mark.unit
+def test_editor_wiped_fctl_key_readopts_no_duplicate_library(tools_dir):
+    """Field finding: FreeCAD's library editor drops the smooth key on
+    save (same as the ToolBit editor) - the next sync created a DUPLICATE
+    library. Re-adoption via journal/recorded filename must update the
+    existing one instead."""
+    server = FakeServer()
+    plan = sync.plan_sync(str(tools_dir), server)
+    sync.apply_sync(str(tools_dir), server, plan,
+                    {i["key"]: "push" for i in plan["items"]})
+    assert len(server.libraries) == 1
+
+    # simulate the library editor: rewrite without the smooth key + an edit
+    fctl_path = tools_dir / "Library" / "default.fctl"
+    doc = read(fctl_path)
+    doc.pop("smooth")
+    doc["tools"] = doc["tools"][:1]
+    fctl_path.write_text(json.dumps(doc))
+
+    item = plan_by_key(sync.plan_sync(str(tools_dir), server))["lib:default.fctl"]
+    assert item["action"] == "push"          # matched, not new_local
+    summary = sync.apply_sync(str(tools_dir), server,
+                              sync.plan_sync(str(tools_dir), server),
+                              {"lib:default.fctl": "push"})
+    assert summary["errors"] == []
+    assert len(server.libraries) == 1        # NO duplicate
+    assert len(list(server.libraries.values())[0]["tool_record_ids"]) == 1
+    assert "smooth" in read(fctl_path)       # identity restored

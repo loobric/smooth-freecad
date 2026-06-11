@@ -167,11 +167,17 @@ def export_tools(tools_dir, client, log=lambda msg: None):
         payload, unresolved, prior_id = mapping.fctl_to_library(
             doc, summary["record_id_by_path"]
         )
+        payload["extra"]["freecad"]["filename"] = basename
         for missing in unresolved:
             summary["errors"].append(
                 "%s: member %s has no server record (bit export failed?)"
                 % (basename, missing)
             )
+
+        if not prior_id or prior_id not in server_libraries:
+            prior_id = _readopt_library(
+                basename, server_libraries, _load_sync_state(tools_dir), log
+            ) or prior_id
 
         if prior_id and prior_id in server_libraries:
             current = server_libraries[prior_id]
@@ -469,6 +475,27 @@ def _membership_delta(local_doc, regenerated):
 STATE_BASENAME = ".smooth_state.json"
 
 
+def _readopt_library(basename, server_libraries, state, log=lambda m: None):
+    """Deterministic library re-adoption when the .fctl identity key is
+    missing/stale (FreeCAD's library editor drops unknown keys on save,
+    same as the ToolBit editor). Journal first, then the filename the
+    server recorded at export. NEVER by name.
+    """
+    for lid, recorded in (state.get("libraries") or {}).items():
+        if recorded == basename and lid in server_libraries:
+            log("%s: identity key missing (editor save?); re-adopted from "
+                "sync journal" % basename)
+            return lid
+    matches = [
+        lid for lid, lib in server_libraries.items()
+        if ((lib.get("extra") or {}).get("freecad", {})).get("filename") == basename
+    ]
+    if len(matches) == 1:
+        log("%s: re-adopted by recorded filename" % basename)
+        return matches[0]
+    return None
+
+
 def _load_sync_state(tools_dir):
     """This install's memory of what it has synced - the only way to tell
     'deleted here' from 'new on the server' (and vice versa). Lives with
@@ -617,9 +644,13 @@ def plan_sync(tools_dir, client):
             })
 
     # libraries
+    server_libs_by_id = {l["id"]: l for l in server_libraries}
     lib_by_id = {}
     for lpath, ldoc in local_lib_docs.items():
         lid = (ldoc.get("smooth") or {}).get("library_id")
+        if not lid or lid not in server_libs_by_id:
+            lid = _readopt_library(os.path.basename(lpath),
+                                   server_libs_by_id, state) or lid
         if lid:
             lib_by_id[lid] = lpath
     matched_libs = set()
@@ -782,6 +813,7 @@ def apply_sync(tools_dir, client, plan, decisions, log=lambda msg: None):
     def push_library(item):
         doc = _read_json(item["path"])
         payload, unresolved, _ = mapping.fctl_to_library(doc, record_id_by_path)
+        payload["extra"]["freecad"]["filename"] = item["basename"]
         for missing in unresolved:
             summary["errors"].append(
                 "%s: member %s has no server record - upload it first"
