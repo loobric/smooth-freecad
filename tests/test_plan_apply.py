@@ -212,7 +212,7 @@ def test_library_detail_shows_membership_delta(tools_dir):
 
     item = plan_by_key(sync.plan_sync(str(tools_dir), server))["lib:default.fctl"]
     assert item["action"] == "pull"
-    assert "server adds: probe.fctb" in item["detail"]
+    assert "members only on server: probe.fctb" in item["detail"]
 
 
 @pytest.mark.unit
@@ -247,3 +247,92 @@ def test_editor_reformat_is_not_a_change(tools_dir):
     assert item["action"] == "push"
     assert len(item["diff"]) == 1
     assert item["diff"][0]["field"] == "name"
+
+
+@pytest.mark.unit
+def test_local_member_removal_pushes_and_reports_neutrally(tools_dir):
+    """Removing a tool from a library locally: the delta says the member is
+    'only here'... wait - removed locally means only on SERVER. Wording must
+    not imply the server ADDED it."""
+    server = FakeServer()
+    plan = sync.plan_sync(str(tools_dir), server)
+    sync.apply_sync(str(tools_dir), server, plan,
+                    {i["key"]: "push" for i in plan["items"]})
+
+    fctl_path = tools_dir / "Library" / "default.fctl"
+    doc = read(fctl_path)
+    doc["tools"] = [t for t in doc["tools"] if t["path"] != "drill_5.0mm.fctb"]
+    fctl_path.write_text(json.dumps(doc))
+
+    item = plan_by_key(sync.plan_sync(str(tools_dir), server))["lib:default.fctl"]
+    assert item["action"] == "push"
+    assert "members only on server: drill_5.0mm.fctb" in item["detail"]
+
+    sync.apply_sync(str(tools_dir), server, {"items": [item], "errors": []},
+                    {"lib:default.fctl": "push"})
+    library = list(server.libraries.values())[0]
+    assert len(library["tool_record_ids"]) == 1  # removal reached the server
+
+
+@pytest.mark.unit
+def test_deleted_local_file_does_not_resurrect(tools_dir):
+    """THE deletion bug: a locally-deleted tool must classify 'deleted_local'
+    (not 'new on server'), default to skip, and propagate on explicit push."""
+    server = FakeServer()
+    plan = sync.plan_sync(str(tools_dir), server)
+    sync.apply_sync(str(tools_dir), server, plan,
+                    {i["key"]: "push" for i in plan["items"]})
+
+    (tools_dir / "Bit" / "probe.fctb").unlink()
+    item_map = plan_by_key(sync.plan_sync(str(tools_dir), server))
+    deleted = [i for i in item_map.values() if i["action"] == "deleted_local"]
+    assert len(deleted) == 1
+    assert deleted[0]["name"] == "Probe"
+    assert not [i for i in item_map.values() if i["action"] == "new_server"]
+
+    # explicit choice: propagate the deletion
+    plan = sync.plan_sync(str(tools_dir), server)
+    summary = sync.apply_sync(str(tools_dir), server, plan,
+                              {deleted[0]["key"]: "push"})
+    assert summary["deleted"] == 1 and summary["errors"] == []
+    assert len(server.records) == 2
+    # converged: no deletion row remains, nothing resurrects
+    actions = {i["action"] for i in sync.plan_sync(str(tools_dir), server)["items"]}
+    assert actions <= {"unchanged", "push"}  # library may show member removal
+
+
+@pytest.mark.unit
+def test_deleted_local_can_restore_instead(tools_dir):
+    server = FakeServer()
+    plan = sync.plan_sync(str(tools_dir), server)
+    sync.apply_sync(str(tools_dir), server, plan,
+                    {i["key"]: "push" for i in plan["items"]})
+    (tools_dir / "Bit" / "probe.fctb").unlink()
+
+    plan = sync.plan_sync(str(tools_dir), server)
+    deleted = [i for i in plan["items"] if i["action"] == "deleted_local"][0]
+    summary = sync.apply_sync(str(tools_dir), server, plan,
+                              {deleted["key"]: "pull"})
+    assert summary["pulled"] == 1
+    assert (tools_dir / "Bit" / "probe.fctb").exists()
+
+
+@pytest.mark.unit
+def test_deleted_on_server_does_not_reupload_silently(tools_dir):
+    server = FakeServer()
+    plan = sync.plan_sync(str(tools_dir), server)
+    sync.apply_sync(str(tools_dir), server, plan,
+                    {i["key"]: "push" for i in plan["items"]})
+    probe_rid = read(tools_dir / "Bit" / "probe.fctb")["smooth"]["record_id"]
+    del server.records[probe_rid]
+
+    item_map = plan_by_key(sync.plan_sync(str(tools_dir), server))
+    item = item_map["bit:probe.fctb"]
+    assert item["action"] == "deleted_server"
+
+    # choice A: delete the local file too
+    plan = sync.plan_sync(str(tools_dir), server)
+    summary = sync.apply_sync(str(tools_dir), server, plan,
+                              {"bit:probe.fctb": "pull"})
+    assert summary["deleted"] == 1
+    assert not (tools_dir / "Bit" / "probe.fctb").exists()

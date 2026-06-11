@@ -456,14 +456,39 @@ def _membership_delta(local_doc, regenerated):
     """Human-readable library membership difference."""
     local_paths = [t.get("path") for t in (local_doc.get("tools") or [])]
     server_paths = [t.get("path") for t in (regenerated.get("tools") or [])]
-    added = [p for p in server_paths if p not in local_paths]
-    removed = [p for p in local_paths if p not in server_paths]
+    only_server = [p for p in server_paths if p not in local_paths]
+    only_local = [p for p in local_paths if p not in server_paths]
     parts = []
-    if added:
-        parts.append("server adds: " + ", ".join(added))
-    if removed:
-        parts.append("server lacks: " + ", ".join(removed))
+    if only_server:
+        parts.append("members only on server: " + ", ".join(only_server))
+    if only_local:
+        parts.append("members only here: " + ", ".join(only_local))
     return "; ".join(parts)
+
+
+STATE_BASENAME = ".smooth_state.json"
+
+
+def _load_sync_state(tools_dir):
+    """This install's memory of what it has synced - the only way to tell
+    'deleted here' from 'new on the server' (and vice versa). Lives with
+    the library it describes."""
+    try:
+        with open(os.path.join(tools_dir, STATE_BASENAME)) as f:
+            state = json.load(f)
+    except (OSError, ValueError):
+        state = {}
+    state.setdefault("records", {})
+    state.setdefault("libraries", {})
+    return state
+
+
+def _save_sync_state(tools_dir, state):
+    try:
+        with open(os.path.join(tools_dir, STATE_BASENAME), "w") as f:
+            json.dump(state, f, indent=2)
+    except OSError:
+        pass
 
 
 def plan_sync(tools_dir, client):
@@ -481,9 +506,12 @@ def plan_sync(tools_dir, client):
     """
     items = []
     errors = []
+    state = _load_sync_state(tools_dir)
     bit_paths, lib_paths = scan_tools_dir(tools_dir)
     server_records = client.list_records()
     server_libraries = client.list_libraries()
+    server_record_ids = {r["id"] for r in server_records}
+    server_library_ids = {l["id"] for l in server_libraries}
 
     by_record_id, by_fctb_id, by_filename = {}, {}, {}
     local_docs = {}
@@ -524,14 +552,26 @@ def plan_sync(tools_dir, client):
                 or (fctb_id and by_fctb_id.get(fctb_id))
                 or (meta.get("filename") and by_filename.get(meta["filename"])))
         if not path or path not in local_docs:
-            items.append({
-                "key": "server:%s" % record["id"], "kind": "bit",
-                "name": record.get("name", "?"), "path": None,
-                "basename": meta.get("filename"),
-                "action": "new_server",
-                "detail": "exists on the server only - import creates the file",
-                "library": None, "record": record,
-            })
+            if record["id"] in state["records"]:
+                items.append({
+                    "key": "server:%s" % record["id"], "kind": "bit",
+                    "name": record.get("name", "?"), "path": None,
+                    "basename": meta.get("filename"),
+                    "action": "deleted_local",
+                    "detail": "the file '%s' was deleted here - propagate the "
+                              "deletion to the server, or restore the file"
+                              % state["records"][record["id"]],
+                    "library": None, "record": record, "diff": [],
+                })
+            else:
+                items.append({
+                    "key": "server:%s" % record["id"], "kind": "bit",
+                    "name": record.get("name", "?"), "path": None,
+                    "basename": meta.get("filename"),
+                    "action": "new_server",
+                    "detail": "exists on the server only - import creates the file",
+                    "library": None, "record": record, "diff": [],
+                })
             continue
         matched_paths.add(path)
         regenerated = mapping.record_to_fctb(record)
@@ -557,13 +597,24 @@ def plan_sync(tools_dir, client):
         if path in matched_paths:
             continue
         basename = os.path.basename(path)
-        items.append({
-            "key": "bit:%s" % basename, "kind": "bit",
-            "name": doc.get("name") or basename,
-            "path": path, "basename": basename, "action": "new_local",
-            "detail": "not on the server yet - apply uploads it",
-            "library": member_of.get(basename), "record": None,
-        })
+        rid = (doc.get("smooth") or {}).get("record_id")
+        if rid and rid in state["records"].keys() and rid not in server_record_ids:
+            items.append({
+                "key": "bit:%s" % basename, "kind": "bit",
+                "name": doc.get("name") or basename,
+                "path": path, "basename": basename, "action": "deleted_server",
+                "detail": "this tool's record was deleted on the server - "
+                          "upload it again, or delete the local file too",
+                "library": member_of.get(basename), "record": None, "diff": [],
+            })
+        else:
+            items.append({
+                "key": "bit:%s" % basename, "kind": "bit",
+                "name": doc.get("name") or basename,
+                "path": path, "basename": basename, "action": "new_local",
+                "detail": "not on the server yet - apply uploads it",
+                "library": member_of.get(basename), "record": None, "diff": [],
+            })
 
     # libraries
     lib_by_id = {}
@@ -575,13 +626,23 @@ def plan_sync(tools_dir, client):
     for library in server_libraries:
         lpath = lib_by_id.get(library["id"])
         if not lpath or lpath not in local_lib_docs:
-            items.append({
-                "key": "server-lib:%s" % library["id"], "kind": "library",
-                "name": library.get("name", "?"), "path": None,
-                "basename": None, "action": "new_server",
-                "detail": "library exists on the server only",
-                "library": None, "record": library,
-            })
+            if library["id"] in state["libraries"]:
+                items.append({
+                    "key": "server-lib:%s" % library["id"], "kind": "library",
+                    "name": library.get("name", "?"), "path": None,
+                    "basename": None, "action": "deleted_local",
+                    "detail": "the library file was deleted here - propagate "
+                              "or restore", "library": None,
+                    "record": library, "diff": [],
+                })
+            else:
+                items.append({
+                    "key": "server-lib:%s" % library["id"], "kind": "library",
+                    "name": library.get("name", "?"), "path": None,
+                    "basename": None, "action": "new_server",
+                    "detail": "library exists on the server only",
+                    "library": None, "record": library, "diff": [],
+                })
             continue
         matched_libs.add(lpath)
         base = (library.get("extra") or {}).get("freecad", {}).get("fctl")
@@ -619,12 +680,19 @@ def plan_sync(tools_dir, client):
         if lpath in matched_libs:
             continue
         basename = os.path.basename(lpath)
+        lid = (ldoc.get("smooth") or {}).get("library_id")
+        action = "deleted_server" if (
+            lid and lid in state["libraries"] and lid not in server_library_ids
+        ) else "new_local"
         items.append({
             "key": "lib:%s" % basename, "kind": "library",
             "name": ldoc.get("label") or basename,
-            "path": lpath, "basename": basename, "action": "new_local",
-            "detail": "not on the server yet - apply uploads it",
-            "library": None, "record": None,
+            "path": lpath, "basename": basename, "action": action,
+            "detail": "this library was deleted on the server - upload it "
+                      "again, or delete the local file too"
+                      if action == "deleted_server"
+                      else "not on the server yet - apply uploads it",
+            "library": None, "record": None, "diff": [],
         })
 
     return {"items": items, "errors": errors}
@@ -654,7 +722,9 @@ def apply_sync(tools_dir, client, plan, decisions, log=lambda msg: None):
     - take_server rewrites the local file from the server record
     - library uploads re-resolve membership from local files at apply time
     """
-    summary = {"pushed": 0, "pulled": 0, "skipped": 0, "errors": []}
+    summary = {"pushed": 0, "pulled": 0, "skipped": 0, "deleted": 0,
+               "errors": []}
+    state = _load_sync_state(tools_dir)
     by_key = {i["key"]: i for i in plan["items"]}
     bit_dir = os.path.join(tools_dir, "Bit")
     lib_dir = os.path.join(tools_dir, "Library")
@@ -688,6 +758,7 @@ def apply_sync(tools_dir, client, plan, decisions, log=lambda msg: None):
             rec = result["items"][0]
             _writeback_identity(item["path"], "record_id", rec["id"], rec["version"])
             record_id_by_path[item["basename"]] = rec["id"]
+            state["records"][rec["id"]] = item["basename"]
             summary["pushed"] += 1
             log("uploaded %s" % item["basename"])
 
@@ -704,6 +775,7 @@ def apply_sync(tools_dir, client, plan, decisions, log=lambda msg: None):
                                     % (stem, item["record"]["id"][:8]))
         _write_json(path, regenerated)
         record_id_by_path[os.path.basename(path)] = item["record"]["id"]
+        state["records"][item["record"]["id"]] = os.path.basename(path)
         summary["pulled"] += 1
         log("downloaded %s" % os.path.basename(path))
 
@@ -725,6 +797,7 @@ def apply_sync(tools_dir, client, plan, decisions, log=lambda msg: None):
         if result.get("items"):
             lib = result["items"][0]
             _writeback_identity(item["path"], "library_id", lib["id"], lib["version"])
+            state["libraries"][lib["id"]] = item["basename"]
             summary["pushed"] += 1
             log("uploaded %s" % item["basename"])
 
@@ -738,6 +811,7 @@ def apply_sync(tools_dir, client, plan, decisions, log=lambda msg: None):
         path = item["path"] or os.path.join(
             lib_dir, _slug(item["record"].get("name", "library")) + ".fctl")
         _write_json(path, regenerated)
+        state["libraries"][item["record"]["id"]] = os.path.basename(path)
         summary["pulled"] += 1
         log("downloaded %s" % os.path.basename(path))
 
@@ -750,7 +824,28 @@ def apply_sync(tools_dir, client, plan, decisions, log=lambda msg: None):
                 summary["skipped"] += 1
             continue
         try:
-            if decision == "push" and item["path"] is None:
+            if item["action"] == "deleted_local" and decision == "push":
+                # explicit human choice: propagate the local deletion
+                if item["kind"] == "bit":
+                    client.delete_records([item["record"]["id"]])
+                    state["records"].pop(item["record"]["id"], None)
+                else:
+                    client.delete_libraries([item["record"]["id"]])
+                    state["libraries"].pop(item["record"]["id"], None)
+                summary["deleted"] += 1
+                log("deleted on server: %s" % item["name"])
+            elif item["action"] == "deleted_server" and decision == "pull":
+                # explicit human choice: delete the local file too
+                os.remove(item["path"])
+                if item["kind"] == "bit":
+                    state["records"] = {k: v for k, v in state["records"].items()
+                                        if v != item["basename"]}
+                else:
+                    state["libraries"] = {k: v for k, v in state["libraries"].items()
+                                          if v != item["basename"]}
+                summary["deleted"] += 1
+                log("deleted local file: %s" % item["basename"])
+            elif decision == "push" and item["path"] is None:
                 summary["errors"].append(
                     "%s: nothing local to upload" % item["name"])
             elif decision == "pull" and item["record"] is None:
@@ -762,4 +857,11 @@ def apply_sync(tools_dir, client, plan, decisions, log=lambda msg: None):
                 push_library(item) if decision == "push" else pull_library(item)
         except SyncApplyError as e:
             summary["errors"].append(str(e))
+
+    # backfill the journal with everything currently matched, then persist
+    for item in plan["items"]:
+        if item["path"] and item["record"]:
+            bucket = "records" if item["kind"] == "bit" else "libraries"
+            state[bucket][item["record"]["id"]] = item["basename"]
+    _save_sync_state(tools_dir, state)
     return summary

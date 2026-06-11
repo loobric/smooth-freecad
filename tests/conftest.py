@@ -50,6 +50,20 @@ class FakeServer:
             out.append(current)
         return {"success_count": len(out), "errors": errors, "items": out}
 
+    def delete_records(self, ids):
+        n = 0
+        for rid in ids:
+            if rid in self.records:
+                del self.records[rid]; n += 1
+        return {"success_count": n, "errors": [], "items": []}
+
+    def delete_libraries(self, ids):
+        n = 0
+        for lid in ids:
+            if lid in self.libraries:
+                del self.libraries[lid]; n += 1
+        return {"success_count": n, "errors": [], "items": []}
+
     def list_libraries(self):
         return list(self.libraries.values())
 

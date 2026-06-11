@@ -70,6 +70,9 @@ class SmoothClient:
     def get_record(self, record_id):
         return self._call("GET", "/tool-records/%s" % record_id)
 
+    def delete_records(self, ids):
+        return self._call("DELETE", "/tool-records", {"ids": ids})
+
     # Libraries
     def list_libraries(self):
         return self._call("GET", "/libraries")["items"]
@@ -79,3 +82,6 @@ class SmoothClient:
 
     def update_libraries(self, items):
         return self._call("PATCH", "/libraries", {"items": items})
+
+    def delete_libraries(self, ids):
+        return self._call("DELETE", "/libraries", {"ids": ids})

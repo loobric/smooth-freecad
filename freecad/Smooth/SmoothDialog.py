@@ -82,12 +82,21 @@ class SmoothSyncDialog:
         "new_local": "new here",
         "new_server": "new on server",
         "conflict": "changed on BOTH sides",
+        "deleted_local": "deleted here",
+        "deleted_server": "deleted on server",
     }
     DIRECTIONS = ["leave unsynced", "upload local \u2192 server",
                   "download server \u2192 local"]
+    ROW_CHOICES = {
+        "deleted_local": ["leave unsynced", "delete on server too",
+                          "restore from server"],
+        "deleted_server": ["leave unsynced", "upload again (restore)",
+                           "delete local file too"],
+    }
     DECISIONS = {1: "push", 2: "pull"}
     DEFAULT_DIRECTION = {"push": 1, "new_local": 1,
-                         "pull": 2, "new_server": 2, "conflict": 0}
+                         "pull": 2, "new_server": 2, "conflict": 0,
+                         "deleted_local": 0, "deleted_server": 0}
 
     def __init__(self):
         self.config = SmoothConfig.load()
@@ -227,12 +236,13 @@ class SmoothSyncDialog:
             row.setDisabled(True)
             return 0
         combo = QtGui.QComboBox()
-        combo.addItems(self.DIRECTIONS)
+        combo.addItems(self.ROW_CHOICES.get(item["action"], self.DIRECTIONS))
         combo.setCurrentIndex(self.DEFAULT_DIRECTION[item["action"]])
-        if item["path"] is None:
-            combo.model().item(1).setEnabled(False)   # nothing local to upload
-        if item["record"] is None:
-            combo.model().item(2).setEnabled(False)   # nothing to download
+        if item["action"] not in self.ROW_CHOICES:
+            if item["path"] is None:
+                combo.model().item(1).setEnabled(False)   # nothing local
+            if item["record"] is None:
+                combo.model().item(2).setEnabled(False)   # nothing on server
         self.tree.setItemWidget(row, 2, combo)
         self._row_widgets[item["key"]] = combo
         return 1
