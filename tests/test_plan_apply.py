@@ -56,7 +56,7 @@ def test_apply_only_selected(tools_dir):
     server = FakeServer()
     plan = sync.plan_sync(str(tools_dir), server)
     summary = sync.apply_sync(str(tools_dir), server, plan,
-                              {"bit:drill_5.0mm.fctb": "apply"})
+                              {"bit:drill_5.0mm.fctb": "push"})
     assert summary["pushed"] == 1 and summary["errors"] == []
     assert len(server.records) == 1
     assert "smooth" not in read(tools_dir / "Bit" / "probe.fctb")  # untouched
@@ -66,7 +66,9 @@ def test_apply_only_selected(tools_dir):
 def test_full_cycle_then_unchanged(tools_dir):
     server = FakeServer()
     plan = sync.plan_sync(str(tools_dir), server)
-    decisions = {i["key"]: "apply" for i in plan["items"]}
+    decisions = {}
+    for i in plan["items"]:
+        decisions[i["key"]] = "pull" if i["action"] in ("pull", "new_server") else "push"
     summary = sync.apply_sync(str(tools_dir), server, plan, decisions)
     assert summary["errors"] == []
     assert summary["pushed"] == 4
@@ -80,7 +82,7 @@ def test_plan_classifies_push_pull_conflict_and_new_server(tools_dir):
     server = FakeServer()
     plan = sync.plan_sync(str(tools_dir), server)
     sync.apply_sync(str(tools_dir), server, plan,
-                    {i["key"]: "apply" for i in plan["items"]})
+                    {i["key"]: "push" for i in plan["items"]})
 
     # local edit -> push
     p = tools_dir / "Bit" / "drill_5.0mm.fctb"
@@ -112,7 +114,7 @@ def test_conflict_keep_local_force_uploads(tools_dir):
     server = FakeServer()
     first = sync.plan_sync(str(tools_dir), server)
     sync.apply_sync(str(tools_dir), server, first,
-                    {i["key"]: "apply" for i in first["items"]})
+                    {i["key"]: "push" for i in first["items"]})
     p = tools_dir / "Bit" / "probe.fctb"
     doc = read(p); doc["parameter"]["Length"] = "55.0000 mm"
     p.write_text(json.dumps(doc))
@@ -121,7 +123,7 @@ def test_conflict_keep_local_force_uploads(tools_dir):
 
     plan = sync.plan_sync(str(tools_dir), server)
     summary = sync.apply_sync(str(tools_dir), server, plan,
-                              {"bit:probe.fctb": "keep_local"})
+                              {"bit:probe.fctb": "push"})
     assert summary["errors"] == [] and summary["pushed"] == 1
     assert probe["extra"]["freecad"]["fctb"]["parameter"]["Length"] == "55.0000 mm"
     # local wins wholesale: server-side rename overruled by the human choice
@@ -134,7 +136,7 @@ def test_conflict_take_server_rewrites_file(tools_dir):
     server = FakeServer()
     first = sync.plan_sync(str(tools_dir), server)
     sync.apply_sync(str(tools_dir), server, first,
-                    {i["key"]: "apply" for i in first["items"]})
+                    {i["key"]: "push" for i in first["items"]})
     p = tools_dir / "Bit" / "probe.fctb"
     doc = read(p); doc["parameter"]["Length"] = "55.0000 mm"
     p.write_text(json.dumps(doc))
@@ -143,10 +145,71 @@ def test_conflict_take_server_rewrites_file(tools_dir):
 
     plan = sync.plan_sync(str(tools_dir), server)
     summary = sync.apply_sync(str(tools_dir), server, plan,
-                              {"bit:probe.fctb": "take_server"})
+                              {"bit:probe.fctb": "pull"})
     assert summary["pulled"] == 1
     after = read(p)
     assert after["name"] == "server probe"
     assert after["parameter"]["Length"] != "55.0000 mm"  # local edit discarded by choice
     plan = plan_by_key(sync.plan_sync(str(tools_dir), server))
     assert plan["bit:probe.fctb"]["action"] == "unchanged"
+
+
+@pytest.mark.unit
+def test_diff_attributes_changes_to_the_right_side(tools_dir):
+    server = FakeServer()
+    plan = sync.plan_sync(str(tools_dir), server)
+    sync.apply_sync(str(tools_dir), server, plan,
+                    {i["key"]: "push" for i in plan["items"]})
+
+    p = tools_dir / "Bit" / "drill_5.0mm.fctb"
+    doc = read(p); doc["parameter"]["Diameter"] = "5.10 mm"
+    p.write_text(json.dumps(doc))
+    rec = next(r for r in server.records.values()
+               if "drill" in r["extra"]["freecad"]["filename"])
+    rec["name"] = "server rename"; rec["version"] += 1
+
+    item = plan_by_key(sync.plan_sync(str(tools_dir), server))["bit:drill_5.0mm.fctb"]
+    assert item["action"] == "conflict"
+    by_field = {d["field"]: d for d in item["diff"]}
+    assert by_field["parameter.Diameter"]["changed_by"] == "local"
+    assert by_field["parameter.Diameter"]["local"] == "5.10 mm"
+    assert by_field["name"]["changed_by"] == "server"
+    assert by_field["name"]["server"] == "server rename"
+
+
+@pytest.mark.unit
+def test_direction_override_reverts_local_edit(tools_dir):
+    """A locally-changed tool can be PULLED to discard the local edit -
+    the user chooses direction, the classification is only a default."""
+    server = FakeServer()
+    plan = sync.plan_sync(str(tools_dir), server)
+    sync.apply_sync(str(tools_dir), server, plan,
+                    {i["key"]: "push" for i in plan["items"]})
+    p = tools_dir / "Bit" / "drill_5.0mm.fctb"
+    doc = read(p); doc["parameter"]["Diameter"] = "5.10 mm"
+    p.write_text(json.dumps(doc))
+
+    plan = sync.plan_sync(str(tools_dir), server)
+    assert plan_by_key(plan)["bit:drill_5.0mm.fctb"]["action"] == "push"
+    summary = sync.apply_sync(str(tools_dir), server, plan,
+                              {"bit:drill_5.0mm.fctb": "pull"})
+    assert summary["pulled"] == 1 and summary["errors"] == []
+    assert read(p)["parameter"]["Diameter"] == "5.00 mm"  # reverted
+    assert plan_by_key(sync.plan_sync(str(tools_dir), server))[
+        "bit:drill_5.0mm.fctb"]["action"] == "unchanged"
+
+
+@pytest.mark.unit
+def test_library_detail_shows_membership_delta(tools_dir):
+    server = FakeServer()
+    plan = sync.plan_sync(str(tools_dir), server)
+    sync.apply_sync(str(tools_dir), server, plan,
+                    {i["key"]: "push" for i in plan["items"]})
+    library = list(server.libraries.values())[0]
+    probe_rid = read(tools_dir / "Bit" / "probe.fctb")["smooth"]["record_id"]
+    library["tool_record_ids"] = library["tool_record_ids"] + [probe_rid]
+    library["version"] += 1
+
+    item = plan_by_key(sync.plan_sync(str(tools_dir), server))["lib:default.fctl"]
+    assert item["action"] == "pull"
+    assert "server adds: probe.fctb" in item["detail"]

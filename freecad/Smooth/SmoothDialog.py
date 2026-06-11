@@ -77,15 +77,17 @@ class SmoothSyncDialog:
 
     ACTION_LABELS = {
         "unchanged": "in sync",
-        "push": "will upload (changed here)",
-        "pull": "will download (changed on server)",
-        "new_local": "will upload (new)",
-        "new_server": "will download (new on server)",
-        "conflict": "CONFLICT - choose a side",
+        "push": "changed here",
+        "pull": "changed on server",
+        "new_local": "new here",
+        "new_server": "new on server",
+        "conflict": "changed on BOTH sides",
     }
-    CONFLICT_CHOICES = ["skip for now", "keep local (upload)",
-                        "take server (download)"]
-    CONFLICT_DECISIONS = {1: "keep_local", 2: "take_server"}
+    DIRECTIONS = ["leave unsynced", "upload local \u2192 server",
+                  "download server \u2192 local"]
+    DECISIONS = {1: "push", 2: "pull"}
+    DEFAULT_DIRECTION = {"push": 1, "new_local": 1,
+                         "pull": 2, "new_server": 2, "conflict": 0}
 
     def __init__(self):
         self.config = SmoothConfig.load()
@@ -112,20 +114,37 @@ class SmoothSyncDialog:
         layout.addLayout(server_row)
 
         self.tree = QtGui.QTreeWidget()
-        self.tree.setHeaderLabels(["Sync", "Item", "Status"])
-        self.tree.setColumnWidth(0, 60)
-        self.tree.setColumnWidth(1, 320)
+        self.tree.setHeaderLabels(["Item", "Status", "Action"])
+        self.tree.setColumnWidth(0, 280)
+        self.tree.setColumnWidth(1, 170)
+        self.tree.itemSelectionChanged.connect(self._show_diff)
         layout.addWidget(self.tree, stretch=3)
+
+        self.diff_pane = QtGui.QTextEdit()
+        self.diff_pane.setReadOnly(True)
+        self.diff_pane.setMaximumHeight(130)
+        self.diff_pane.setPlaceholderText(
+            "Select a changed item to see exactly which fields differ, "
+            "with each change attributed to the side that made it.")
+        layout.addWidget(self.diff_pane, stretch=1)
 
         self.log = QtGui.QTextEdit()
         self.log.setReadOnly(True)
-        self.log.setMaximumHeight(110)
+        self.log.setMaximumHeight(90)
         layout.addWidget(self.log, stretch=1)
 
         buttons = QtGui.QHBoxLayout()
         self.refresh_button = QtGui.QPushButton("Refresh Plan")
         self.refresh_button.clicked.connect(self.refresh_plan)
         buttons.addWidget(self.refresh_button)
+        defaults_button = QtGui.QPushButton("All: Suggested")
+        defaults_button.setToolTip("Set every item to its suggested direction "
+                                   "(conflicts stay 'leave unsynced')")
+        defaults_button.clicked.connect(lambda: self._set_all(default=True))
+        buttons.addWidget(defaults_button)
+        skip_button = QtGui.QPushButton("All: Skip")
+        skip_button.clicked.connect(lambda: self._set_all(default=False))
+        buttons.addWidget(skip_button)
         self.apply_button = QtGui.QPushButton("Apply Selected")
         self.apply_button.clicked.connect(self._run_apply)
         self.apply_button.setEnabled(False)
@@ -199,34 +218,63 @@ class SmoothSyncDialog:
     def _add_row(self, parent, item, indent_self=False):
         """One tree row per plan item. Returns 1 if it needs attention."""
         label = ("(this library)" if indent_self else item["name"])
-        row = QtGui.QTreeWidgetItem(["", label,
-                                     self.ACTION_LABELS[item["action"]]])
-        row.setToolTip(2, item["detail"])
+        row = QtGui.QTreeWidgetItem([label,
+                                     self.ACTION_LABELS[item["action"]], ""])
+        row.setToolTip(1, item["detail"])
+        row.setData(0, QtCore.Qt.UserRole, item["key"])
         parent.addChild(row)
         if item["action"] == "unchanged":
             row.setDisabled(True)
             return 0
-        if item["action"] == "conflict":
-            combo = QtGui.QComboBox()
-            combo.addItems(self.CONFLICT_CHOICES)
-            self.tree.setItemWidget(row, 0, combo)
-            self._row_widgets[item["key"]] = ("combo", combo)
-        else:
-            check = QtGui.QCheckBox()
-            check.setChecked(True)
-            self.tree.setItemWidget(row, 0, check)
-            self._row_widgets[item["key"]] = ("check", check)
+        combo = QtGui.QComboBox()
+        combo.addItems(self.DIRECTIONS)
+        combo.setCurrentIndex(self.DEFAULT_DIRECTION[item["action"]])
+        if item["path"] is None:
+            combo.model().item(1).setEnabled(False)   # nothing local to upload
+        if item["record"] is None:
+            combo.model().item(2).setEnabled(False)   # nothing to download
+        self.tree.setItemWidget(row, 2, combo)
+        self._row_widgets[item["key"]] = combo
         return 1
+
+    def _set_all(self, default):
+        items_by_key = {i["key"]: i for i in self.plan["items"]}
+        for key, combo in self._row_widgets.items():
+            if default:
+                combo.setCurrentIndex(
+                    self.DEFAULT_DIRECTION[items_by_key[key]["action"]])
+            else:
+                combo.setCurrentIndex(0)
+
+    def _show_diff(self):
+        selected = self.tree.selectedItems()
+        if not selected:
+            return
+        key = selected[0].data(0, QtCore.Qt.UserRole)
+        item = next((i for i in self.plan["items"] if i["key"] == key), None)
+        if not item:
+            self.diff_pane.setPlainText("")
+            return
+        lines = [item["detail"]]
+        for d in item.get("diff", []):
+            side = {"local": "changed here",
+                    "server": "changed on server",
+                    "both": "changed on BOTH sides"}[d["changed_by"]]
+            lines.append("  %s: %r (local)  vs  %r (server)   [%s]"
+                         % (d["field"], d["local"], d["server"], side))
+        if item["action"] == "new_local":
+            lines.append("  (entire file is new to the server)")
+        if item["action"] == "new_server":
+            lines.append("  (entire record is new - downloading creates the file)")
+        self.diff_pane.setPlainText("\n".join(lines))
 
     # -- Apply ------------------------------------------------------------------
 
     def _collect_decisions(self):
         decisions = {}
-        for key, (kind, widget) in self._row_widgets.items():
-            if kind == "check" and widget.isChecked():
-                decisions[key] = "apply"
-            elif kind == "combo" and widget.currentIndex() in self.CONFLICT_DECISIONS:
-                decisions[key] = self.CONFLICT_DECISIONS[widget.currentIndex()]
+        for key, combo in self._row_widgets.items():
+            if combo.currentIndex() in self.DECISIONS:
+                decisions[key] = self.DECISIONS[combo.currentIndex()]
         return decisions
 
     def _run_apply(self):

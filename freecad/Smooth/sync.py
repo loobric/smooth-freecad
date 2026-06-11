@@ -391,6 +391,61 @@ def _classify(local_doc, base, regenerated):
     return "conflict"
 
 
+
+
+def _flatten(doc, prefix=""):
+    """Dotted-key flattening for field-level diffs ('smooth' excluded)."""
+    out = {}
+    for k, v in (doc or {}).items():
+        if k == "smooth":
+            continue
+        key = prefix + k
+        if isinstance(v, dict):
+            out.update(_flatten(v, key + "."))
+        else:
+            out[key] = v
+    return out
+
+
+def diff_docs(local, base, regenerated):
+    """Field-level differences between the local file and the server's
+    version, with each difference attributed to the side that moved away
+    from the last-synced base.
+
+    Returns [{"field", "local", "server", "changed_by": local|server|both}].
+    """
+    lf, bf, rf = _flatten(local), _flatten(base or {}), _flatten(regenerated)
+    diffs = []
+    for field in sorted(set(lf) | set(rf)):
+        lv, rv = lf.get(field), rf.get(field)
+        if lv == rv:
+            continue
+        bv = bf.get(field)
+        if lv != bv and rv != bv:
+            changed_by = "both"
+        elif lv != bv:
+            changed_by = "local"
+        else:
+            changed_by = "server"
+        diffs.append({"field": field, "local": lv, "server": rv,
+                      "changed_by": changed_by})
+    return diffs
+
+
+def _membership_delta(local_doc, regenerated):
+    """Human-readable library membership difference."""
+    local_paths = [t.get("path") for t in (local_doc.get("tools") or [])]
+    server_paths = [t.get("path") for t in (regenerated.get("tools") or [])]
+    added = [p for p in server_paths if p not in local_paths]
+    removed = [p for p in local_paths if p not in server_paths]
+    parts = []
+    if added:
+        parts.append("server adds: " + ", ".join(added))
+    if removed:
+        parts.append("server lacks: " + ", ".join(removed))
+    return "; ".join(parts)
+
+
 def plan_sync(tools_dir, client):
     """Compute the sync plan without touching anything.
 
@@ -459,7 +514,8 @@ def plan_sync(tools_dir, client):
             })
             continue
         matched_paths.add(path)
-        action = _classify(local_docs[path], base, mapping.record_to_fctb(record))
+        regenerated = mapping.record_to_fctb(record)
+        action = _classify(local_docs[path], base, regenerated)
         detail = {
             "unchanged": "in sync",
             "pull": "changed on the server - apply downloads it",
@@ -473,6 +529,8 @@ def plan_sync(tools_dir, client):
             "path": path, "basename": basename, "action": action,
             "detail": detail, "library": member_of.get(basename),
             "record": record,
+            "diff": diff_docs(local_docs[path], base, regenerated)
+                    if action != "unchanged" else [],
         })
 
     for path, doc in local_docs.items():
@@ -518,17 +576,24 @@ def plan_sync(tools_dir, client):
         regenerated, _ = mapping.library_to_fctl(library, path_map)
         action = _classify(local_lib_docs[lpath], base, regenerated)
         basename = os.path.basename(lpath)
+        detail = {
+            "unchanged": "in sync",
+            "pull": "membership/label changed on the server",
+            "push": "changed locally - apply uploads it",
+            "conflict": "changed on BOTH sides - choose a side below",
+        }[action]
+        delta = _membership_delta(local_lib_docs[lpath], regenerated) \
+            if action != "unchanged" else ""
+        if delta:
+            detail += " (" + delta + ")"
         items.append({
             "key": "lib:%s" % basename, "kind": "library",
             "name": local_lib_docs[lpath].get("label") or basename,
             "path": lpath, "basename": basename, "action": action,
-            "detail": {
-                "unchanged": "in sync",
-                "pull": "membership/label changed on the server",
-                "push": "changed locally - apply uploads it",
-                "conflict": "changed on BOTH sides - choose a side below",
-            }[action],
+            "detail": detail,
             "library": None, "record": library,
+            "diff": diff_docs(local_lib_docs[lpath], base, regenerated)
+                    if action != "unchanged" else [],
         })
     for lpath, ldoc in local_lib_docs.items():
         if lpath in matched_libs:
@@ -554,9 +619,12 @@ def apply_sync(tools_dir, client, plan, decisions, log=lambda msg: None):
 
     Args:
         plan: result of plan_sync (recompute after any apply)
-        decisions: {item_key: decision}; absent/"skip" items untouched.
-            For push/pull/new_local/new_server: "apply".
-            For conflict: "keep_local" (upload) or "take_server" (download).
+        decisions: {item_key: "push"|"pull"|"skip"}; absent items are
+            skipped. The decision is the DIRECTION, chosen by the user;
+            the plan's classification is only the suggested default.
+            "push" uploads the local version (force, using the server's
+            current version - an explicit human decision); "pull" writes
+            the server version over the local file.
 
     Returns {"pushed": n, "pulled": n, "skipped": n, "errors": [...]}.
 
@@ -662,24 +730,16 @@ def apply_sync(tools_dir, client, plan, decisions, log=lambda msg: None):
                 summary["skipped"] += 1
             continue
         try:
-            if item["kind"] == "bit":
-                if item["action"] in ("push", "new_local") and decision == "apply":
-                    push_bit(item)
-                elif item["action"] in ("pull", "new_server") and decision == "apply":
-                    pull_bit(item)
-                elif item["action"] == "conflict" and decision == "keep_local":
-                    push_bit(item, force=True)
-                elif item["action"] == "conflict" and decision == "take_server":
-                    pull_bit(item)
+            if decision == "push" and item["path"] is None:
+                summary["errors"].append(
+                    "%s: nothing local to upload" % item["name"])
+            elif decision == "pull" and item["record"] is None:
+                summary["errors"].append(
+                    "%s: nothing on the server to download" % item["name"])
+            elif item["kind"] == "bit":
+                push_bit(item) if decision == "push" else pull_bit(item)
             else:
-                if item["action"] in ("push", "new_local") and decision == "apply":
-                    push_library(item)
-                elif item["action"] in ("pull", "new_server") and decision == "apply":
-                    pull_library(item)
-                elif item["action"] == "conflict" and decision == "keep_local":
-                    push_library(item)
-                elif item["action"] == "conflict" and decision == "take_server":
-                    pull_library(item)
+                push_library(item) if decision == "push" else pull_library(item)
         except SyncApplyError as e:
             summary["errors"].append(str(e))
     return summary
