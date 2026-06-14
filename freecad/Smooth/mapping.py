@@ -38,15 +38,44 @@ INT_PARAMS = {
     "Flutes": "flutes",
 }
 
-# FreeCAD CAM tool shapes. Each maps to a <shape>.fcstd shape file; the shape
-# IS the schema (it fixes which parameters a bit has) and FreeCAD locks it at
-# creation — so a record with no shape of its own must have one chosen BEFORE
-# its .fctb is written, never after. endmill is the historical default.
+# Per-shape .fctb template, keyed by the lowercased shape-type (which is also
+# what geometry.shape stores). Each entry is (shape_file, shape_type, schema).
+# The shape IS the schema: FreeCAD reads `shape-type` and the parameter set to
+# build the bit, and a document missing them collapses to a generic endmill —
+# so synthesizing a tool means emitting its EXACT type string and full
+# parameter schema (geometry values overlay onto these defaults), not just a
+# diameter. Note the names are FreeCAD's own: shape-type "VBit" (not "V-bit"),
+# file "v-bit.fcstd". Defaults are placeholders the user refines in FreeCAD.
+SHAPE_TEMPLATES = {
+    "endmill": ("endmill.fcstd", "Endmill", {
+        "Chipload": "0.00 mm", "CuttingEdgeHeight": "14.00 mm", "Diameter": "6.00 mm",
+        "Flutes": 2, "Length": "50.00 mm", "Material": "HSS",
+        "ShankDiameter": "6.00 mm", "SpindleDirection": "Forward"}),
+    "ballend": ("ballend.fcstd", "Ballend", {
+        "Chipload": "0.00 mm", "CuttingEdgeHeight": "10.00 mm", "Diameter": "6.00 mm",
+        "Flutes": 2, "Length": "50.00 mm", "Material": "HSS",
+        "ShankDiameter": "6.00 mm", "SpindleDirection": "Forward"}),
+    "vbit": ("v-bit.fcstd", "VBit", {
+        "CuttingEdgeAngle": "60.00 °", "CuttingEdgeHeight": "1.00 mm",
+        "Diameter": "10.00 mm", "TipDiameter": "0.10 mm", "Length": "20.00 mm",
+        "ShankDiameter": "6.00 mm"}),
+    "drill": ("drill.fcstd", "Drill", {
+        "Chipload": "0.00 mm", "Diameter": "5.00 mm", "Flutes": 0,
+        "Length": "50.00 mm", "Material": "HSS", "SpindleDirection": "Forward",
+        "TipAngle": "118.00 °"}),
+    "probe": ("probe.fcstd", "Probe", {
+        "Diameter": "6.00 mm", "Length": "50.00 mm", "ShaftDiameter": "4.00 mm"}),
+    "slittingsaw": ("slittingsaw.fcstd", "SlittingSaw", {
+        "BladeThickness": "3.00 mm", "CapHeight": "3.00 mm", "CapDiameter": "8.00 mm",
+        "Diameter": "76.20 mm", "Length": "50.00 mm", "ShankDiameter": "19.05 mm"}),
+    "threadmill": ("thread-mill.fcstd", "ThreadMill", {
+        "Chipload": "0.00 mm", "Crest": "0.10 mm", "Diameter": "6.00 mm", "Flutes": 0,
+        "Length": "60.00 mm", "Material": "HSS", "NeckDiameter": "4.10 mm",
+        "NeckLength": "20.00 mm", "ShankDiameter": "6.00 mm",
+        "SpindleDirection": "Forward", "cuttingAngle": "60.00 °"}),
+}
 DEFAULT_SHAPE = "endmill"
-FREECAD_SHAPES = [
-    "endmill", "ballend", "bullnose", "v-bit", "chamfer", "drill",
-    "probe", "slittingsaw", "thread-mill", "dovetail", "engraver",
-]
+FREECAD_SHAPES = list(SHAPE_TEMPLATES)
 
 
 def record_shape(record):
@@ -175,13 +204,16 @@ def record_to_fctb(record, shape=None):
         doc = copy.deepcopy(base)
     else:
         chosen = shape or current or DEFAULT_SHAPE
+        shape_file, shape_type, template = SHAPE_TEMPLATES.get(
+            chosen, (chosen + ".fcstd", chosen.capitalize(), {}))
         doc = {
             "version": 2,
             "name": record.get("name", ""),
-            "shape": chosen + ".fcstd",
-            "shape-type": chosen.capitalize(),
+            "shape": shape_file,
+            "shape-type": shape_type,
             "attribute": {},
-            "parameter": {},
+            # Full schema for the type; geometry (Diameter, ...) overlays below.
+            "parameter": dict(template),
         }
 
     doc["name"] = record.get("name", doc.get("name", ""))

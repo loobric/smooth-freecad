@@ -193,13 +193,30 @@ def test_record_to_fctb_defaults_to_endmill_when_no_choice():
 
 @pytest.mark.unit
 def test_record_to_fctb_preserves_base_when_shape_matches_or_unset():
-    base = {"version": 2, "name": "x", "shape": "v-bit.fcstd", "shape-type": "V-bit",
+    base = {"version": 2, "name": "x", "shape": "v-bit.fcstd", "shape-type": "VBit",
             "parameter": {"CuttingEdgeAngle": "30 °"}}
-    rec = {"id": "r", "name": "x", "geometry": {"shape": "v-bit"},
+    rec = {"id": "r", "name": "x", "geometry": {"shape": "vbit"},
            "extra": {"freecad": {"fctb": base}}}
     assert record_to_fctb(rec)["shape"] == "v-bit.fcstd"             # lossless
     assert "CuttingEdgeAngle" in record_to_fctb(rec)["parameter"]
-    assert record_to_fctb(rec, shape="v-bit")["shape"] == "v-bit.fcstd"  # same -> kept
+    assert record_to_fctb(rec, shape="vbit")["shape"] == "v-bit.fcstd"  # same -> kept
+
+
+@pytest.mark.unit
+def test_synthesized_tool_carries_the_shapes_full_schema():
+    """The crux: a synthesized bit must emit the shape's EXACT type string and
+    full parameter schema, else FreeCAD can't build it and shows an endmill."""
+    doc = record_to_fctb({"id": "r", "name": "60deg", "geometry": {"diameter": 10.0},
+                          "extra": {}}, shape="vbit")
+    assert doc["shape"] == "v-bit.fcstd"
+    assert doc["shape-type"] == "VBit"                       # exact, not 'V-bit'
+    assert set(doc["parameter"]) >= {"CuttingEdgeAngle", "TipDiameter", "ShankDiameter"}
+
+    probe = record_to_fctb({"id": "p", "name": "Probe", "geometry": {"diameter": 3.0},
+                            "extra": {}}, shape="probe")
+    assert probe["shape-type"] == "Probe"
+    assert set(probe["parameter"]) >= {"Diameter", "Length", "ShaftDiameter"}
+    assert probe["parameter"]["Diameter"].startswith("3")   # geometry overlaid
 
 
 @pytest.mark.unit
