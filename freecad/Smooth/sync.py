@@ -873,13 +873,37 @@ def apply_sync(tools_dir, client, plan, decisions, shapes=None, log=lambda msg: 
                 path = os.path.join(bit_dir, "%s_%s.fctb"
                                     % (stem, item["record"]["id"][:8]))
         _write_json(path, regenerated)
-        record_id_by_path[os.path.basename(path)] = item["record"]["id"]
-        state["records"][item["record"]["id"]] = os.path.basename(path)
+        basename = os.path.basename(path)
+        record_id_by_path[basename] = item["record"]["id"]
+        state["records"][item["record"]["id"]] = basename
         summary["pulled"] += 1
         log("  DOWNLOAD record %s -> %s [%s]%s (stays linked to server record)"
-            % (item["record"]["id"][:8], os.path.basename(path),
+            % (item["record"]["id"][:8], basename,
                regenerated.get("shape-type", "?"),
                " type set to %s" % chosen if chosen else ""))
+
+        # If the user CORRECTED the type (chose one that differs from the
+        # record's stored shape — typically fixing a wrong 'endmill'), heal the
+        # server record too. Otherwise the server stays polluted, the canonical
+        # geometry.shape keeps misinforming binding/other clients, and the very
+        # next sync re-flags this tool as a pending upload. The machine binding
+        # is preserved (same record id is UPDATED, never recreated).
+        if chosen and chosen != mapping.record_shape(item["record"]):
+            payload, _ = mapping.fctb_to_record(regenerated)
+            payload["extra"]["freecad"]["filename"] = basename
+            result = client.update_records([{
+                "id": item["record"]["id"],
+                "version": item["record"]["version"], **payload}])
+            for err in result.get("errors", []):
+                summary["errors"].append(
+                    "%s: could not correct server shape (%s)"
+                    % (basename, err.get("message")))
+            if result.get("items"):
+                rec = result["items"][0]
+                _writeback_identity(path, "record_id", rec["id"], rec["version"])
+                state["records"][rec["id"]] = basename
+                log("  corrected server record %s: shape -> %s (machine binding kept)"
+                    % (rec["id"][:8], chosen))
 
     def push_library(item):
         doc = _read_json(item["path"])

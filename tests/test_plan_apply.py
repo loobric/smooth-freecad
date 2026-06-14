@@ -533,3 +533,56 @@ def test_download_server_library_groups_and_does_not_recreate_records(tmp_path):
     assert docs["T1"]["smooth"]["record_id"] == ids[0]   # stays linked
     assert docs["T1"]["shape"] == "drill.fcstd"           # chosen type applied
     assert docs["T2"]["shape"] == "probe.fcstd"
+
+
+@pytest.mark.unit
+def test_type_correction_on_download_heals_the_server_record(tmp_path):
+    """Correcting a wrongly-stamped tool's type on download must also fix the
+    SERVER record (in place, keeping its id/binding) — not just the local file —
+    so the server stops claiming endmill and the next sync converges."""
+    (tmp_path / "Bit").mkdir()
+    (tmp_path / "Library").mkdir()
+    server = FakeServer()
+    rec = server.create_records([{
+        "name": "Probe", "geometry": {"shape": "endmill", "diameter": 3.0},
+        "extra": {"freecad": {"fctb": {
+            "version": 2, "name": "Probe", "shape": "endmill.fcstd",
+            "shape-type": "Endmill", "attribute": {},
+            "parameter": {"Diameter": "3.00 mm"}}}},
+    }])["items"][0]
+    rid = rec["id"]
+
+    plan = sync.plan_sync(str(tmp_path), server)
+    sync.apply_sync(str(tmp_path), server, plan,
+                    {"server:%s" % rid: "pull"}, shapes={"server:%s" % rid: "probe"})
+
+    assert rid in server.records                       # UPDATED in place, not recreated
+    healed = server.records[rid]
+    assert healed["geometry"]["shape"] == "probe"      # canonical shape fixed
+    assert healed["extra"]["freecad"]["fctb"]["shape"] == "probe.fcstd"
+
+    # cycle converges: the very next sync is a no-op, not a pending push-back
+    plan2 = sync.plan_sync(str(tmp_path), server)
+    bit = next(i for i in plan2["items"]
+               if i["kind"] == "bit" and (i.get("record") or {}).get("id") == rid)
+    assert bit["action"] == "unchanged"
+
+
+@pytest.mark.unit
+def test_plain_download_without_correction_does_not_touch_server(tmp_path):
+    """A download with NO type change stays a pure pull — no server writes."""
+    (tmp_path / "Bit").mkdir()
+    (tmp_path / "Library").mkdir()
+    server = FakeServer()
+    rec = server.create_records([{
+        "name": "6mm EM", "geometry": {"shape": "endmill", "diameter": 6.0},
+        "extra": {"freecad": {"fctb": {
+            "version": 2, "name": "6mm EM", "shape": "endmill.fcstd",
+            "shape-type": "Endmill", "attribute": {}, "parameter": {"Diameter": "6.00 mm"}}}},
+    }])["items"][0]
+    snapshot = json.dumps(rec, sort_keys=True)
+    plan = sync.plan_sync(str(tmp_path), server)
+    # download, leaving the type as-is (endmill)
+    sync.apply_sync(str(tmp_path), server, plan,
+                    {"server:%s" % rec["id"]: "pull"}, shapes={"server:%s" % rec["id"]: "endmill"})
+    assert json.dumps(server.records[rec["id"]], sort_keys=True) == snapshot  # untouched
