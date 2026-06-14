@@ -530,7 +530,7 @@ def _save_sync_state(tools_dir, state):
         pass
 
 
-def plan_sync(tools_dir, client):
+def plan_sync(tools_dir, client, log=lambda msg: None):
     """Compute the sync plan without touching anything.
 
     Returns {"items": [...], "errors": [...]}; each item:
@@ -540,11 +540,17 @@ def plan_sync(tools_dir, client):
          "action": "unchanged"|"push"|"pull"|"new_local"|"new_server"
                    |"conflict",
          "detail": str,
-         "library": str|None,       # owning .fctl basename for bits
+         "library": str|None,       # owning .fctl basename for bits (local)
+         "group": str|None,         # stable grouping handle (owning library,
+                                    # local OR server) — the dialog groups on
+                                    # this; None means "not in any library"
          "record": dict|None}       # server object when one exists
+
+    `log` receives human-readable progress for the Report view / log pane.
     """
     items = []
     errors = []
+    log("Planning: reading local tools and server state…")
     state = _load_sync_state(tools_dir)
     bit_paths, lib_paths = scan_tools_dir(tools_dir)
     server_records = client.list_records()
@@ -738,6 +744,38 @@ def plan_sync(tools_dir, client):
             "library": None, "record": None, "diff": [],
         })
 
+    # Stable grouping: a bit sits under its owning library whether that library
+    # lives locally or only on the server. Without this, server-originated bits
+    # (library=None) all collapse into "not in any library" AND collide with a
+    # server-only library whose basename is also None — so they show twice and
+    # the dialog loses track of which row's choice to honor.
+    server_member_group = {}
+    for tool_set in server_tool_sets:
+        for rid in tool_set.get("tool_record_ids", []) or []:
+            server_member_group.setdefault(rid, "server-lib:%s" % tool_set["id"])
+    for it in items:
+        if it["kind"] == "library":
+            it["group"] = it["basename"] or it["key"]
+        else:
+            rid = (it.get("record") or {}).get("id")
+            it["group"] = it.get("library") or (
+                server_member_group.get(rid) if rid else None)
+
+    # Classification log — the planning side was previously silent.
+    counts = {}
+    for it in items:
+        counts[it["action"]] = counts.get(it["action"], 0) + 1
+    log("Plan: %d item(s) [%s]" % (
+        len(items), ", ".join("%s=%d" % kv for kv in sorted(counts.items())) or "none"))
+    for it in items:
+        if it["action"] == "unchanged":
+            continue
+        where = (" under %s" % it["group"]) if it.get("group") else ""
+        rid = (it.get("record") or {}).get("id")
+        log("  [%s] %s '%s'%s%s" % (
+            it["action"], it["kind"], it["name"], where,
+            (" (record %s)" % rid[:8]) if rid else ""))
+
     return {"items": items, "errors": errors}
 
 
@@ -803,23 +841,28 @@ def apply_sync(tools_dir, client, plan, decisions, shapes=None, log=lambda msg: 
         payload, _ = mapping.fctb_to_record(doc)
         payload["extra"]["freecad"]["filename"] = item["basename"]
         if item["record"]:
+            log("  UPLOAD bit %s -> UPDATE record %s"
+                % (item["basename"], item["record"]["id"][:8]))
             result = client.update_records([{
                 "id": item["record"]["id"],
                 "version": item["record"]["version"], **payload}])
         else:
+            log("  UPLOAD bit %s -> CREATE new server record" % item["basename"])
             result = client.create_records([payload])
         for error in result.get("errors", []):
             summary["errors"].append("%s: %s" % (item["basename"], error.get("message")))
+            log("  ! server rejected %s: %s" % (item["basename"], error.get("message")))
         if result.get("items"):
             rec = result["items"][0]
             _writeback_identity(item["path"], "record_id", rec["id"], rec["version"])
             record_id_by_path[item["basename"]] = rec["id"]
             state["records"][rec["id"]] = item["basename"]
             summary["pushed"] += 1
-            log("uploaded %s" % item["basename"])
+            log("  uploaded %s (record %s)" % (item["basename"], rec["id"][:8]))
 
     def pull_bit(item):
-        regenerated = mapping.record_to_fctb(item["record"], shape=shapes.get(item["key"]))
+        chosen = shapes.get(item["key"])
+        regenerated = mapping.record_to_fctb(item["record"], shape=chosen)
         path = item["path"]
         if not path:
             meta = (item["record"].get("extra") or {}).get("freecad", {})
@@ -833,7 +876,10 @@ def apply_sync(tools_dir, client, plan, decisions, shapes=None, log=lambda msg: 
         record_id_by_path[os.path.basename(path)] = item["record"]["id"]
         state["records"][item["record"]["id"]] = os.path.basename(path)
         summary["pulled"] += 1
-        log("downloaded %s" % os.path.basename(path))
+        log("  DOWNLOAD record %s -> %s [%s]%s (stays linked to server record)"
+            % (item["record"]["id"][:8], os.path.basename(path),
+               regenerated.get("shape-type", "?"),
+               " type set to %s" % chosen if chosen else ""))
 
     def push_library(item):
         doc = _read_json(item["path"])
@@ -874,12 +920,17 @@ def apply_sync(tools_dir, client, plan, decisions, shapes=None, log=lambda msg: 
 
     # bits before libraries so membership resolves
     ordered = sorted(plan["items"], key=lambda i: 0 if i["kind"] == "bit" else 1)
+    active = {k: v for k, v in decisions.items() if v != "skip"}
+    log("Applying %d decision(s): %s" % (
+        len(active),
+        ", ".join("%s=%s" % (k, v) for k, v in sorted(active.items())) or "none"))
     for item in ordered:
         decision = decisions.get(item["key"], "skip")
         if decision == "skip" or item["action"] == "unchanged":
             if decision == "skip" and item["action"] != "unchanged":
                 summary["skipped"] += 1
             continue
+        log("• %s '%s' [%s] -> %s" % (item["kind"], item["name"], item["action"], decision))
         try:
             if item["action"] == "deleted_local" and decision == "push":
                 # explicit human choice: propagate the local deletion

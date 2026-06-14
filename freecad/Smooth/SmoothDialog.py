@@ -138,10 +138,11 @@ class SmoothSyncDialog:
             "with each change attributed to the side that made it.")
         layout.addWidget(self.diff_pane, stretch=1)
 
+        layout.addWidget(QtGui.QLabel("Log (also written to the Report view):"))
         self.log = QtGui.QTextEdit()
         self.log.setReadOnly(True)
-        self.log.setMaximumHeight(90)
-        layout.addWidget(self.log, stretch=1)
+        self.log.setMinimumHeight(150)
+        layout.addWidget(self.log, stretch=2)
 
         buttons = QtGui.QHBoxLayout()
         self.refresh_button = QtGui.QPushButton("Refresh Plan")
@@ -166,7 +167,10 @@ class SmoothSyncDialog:
         layout.addLayout(buttons)
 
     def _append(self, message: str):
+        # Mirror to FreeCAD's Report view so there's a persistent, copyable
+        # log to debug from — the in-dialog pane scrolls and is lost on close.
         self.log.append(message)
+        App.Console.PrintMessage("Smooth: %s\n" % message)
         QtGui.QApplication.processEvents()
 
     def _client(self) -> SmoothClient:
@@ -187,7 +191,8 @@ class SmoothSyncDialog:
             self.apply_button.setEnabled(False)
             return
         try:
-            self.plan = sync.plan_sync(str(get_tools_dir()), self._client())
+            self.plan = sync.plan_sync(str(get_tools_dir()), self._client(),
+                                       log=self._append)
         except SmoothError as e:
             self._append(f"Planning failed: {e}")
             return
@@ -197,27 +202,33 @@ class SmoothSyncDialog:
         items = self.plan["items"]
         libraries = [i for i in items if i["kind"] == "library"]
         bits = [i for i in items if i["kind"] == "bit"]
-        bits_by_library = {}
+        # Group bits by their owning library (local OR server) via the plan's
+        # stable `group` handle. Each bit is rendered AT MOST ONCE (the `shown`
+        # guard), so a tool never appears under both a library and "not in any
+        # library" — and never gets a second combo that shadows the first.
+        bits_by_group = {}
         for bit in bits:
-            bits_by_library.setdefault(bit.get("library"), []).append(bit)
+            bits_by_group.setdefault(bit.get("group"), []).append(bit)
 
         pending = 0
+        shown = set()
         for library in sorted(libraries, key=lambda i: i["name"]):
-            group = QtGui.QTreeWidgetItem(
-                ["", f"📁 {library['name']}", ""])
-            self.tree.addTopLevelItem(group)
-            pending += self._add_row(group, library, indent_self=True)
-            for bit in sorted(bits_by_library.get(library.get("basename"), []),
+            node = QtGui.QTreeWidgetItem(["", f"📁 {library['name']}", "", ""])
+            self.tree.addTopLevelItem(node)
+            pending += self._add_row(node, library, indent_self=True)
+            for bit in sorted(bits_by_group.get(library["group"], []),
                               key=lambda i: i["name"]):
-                pending += self._add_row(group, bit)
-            group.setExpanded(True)
-        loose = bits_by_library.get(None, [])
+                pending += self._add_row(node, bit)
+                shown.add(bit["key"])
+            node.setExpanded(True)
+        loose = [b for b in sorted(bits, key=lambda i: i["name"])
+                 if b["key"] not in shown]
         if loose:
-            group = QtGui.QTreeWidgetItem(["", "📄 Not in any library", ""])
-            self.tree.addTopLevelItem(group)
-            for bit in sorted(loose, key=lambda i: i["name"]):
-                pending += self._add_row(group, bit)
-            group.setExpanded(True)
+            node = QtGui.QTreeWidgetItem(["", "📄 Not in any library", "", ""])
+            self.tree.addTopLevelItem(node)
+            for bit in loose:
+                pending += self._add_row(node, bit)
+            node.setExpanded(True)
 
         if pending:
             self._append(f"Plan ready: {pending} item(s) need attention. "

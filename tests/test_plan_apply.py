@@ -486,3 +486,50 @@ def test_in_sync_bit_offers_no_type_choice(tools_dir):
         if i["kind"] == "bit":
             assert i["action"] == "unchanged"
             assert sync.needs_shape_choice(i) is False
+
+
+@pytest.mark.unit
+def test_download_server_library_groups_and_does_not_recreate_records(tmp_path):
+    """Field repro: a server tool set + member records, nothing local.
+    (1) each member bit groups UNDER the server library, never loose/duplicated;
+    (2) downloading everything must NOT create new server records — the pulled
+        files stay LINKED to the existing records (so they remain machine-bound).
+    """
+    (tmp_path / "Bit").mkdir()
+    (tmp_path / "Library").mkdir()
+    server = FakeServer()
+    ids = []
+    for n in (1, 2, 3):
+        r = server.create_records([{
+            "name": "T%d" % n,
+            "geometry": {"shape": "endmill", "diameter": float(n)},
+            "extra": {"freecad": {"fctb": {
+                "version": 2, "name": "T%d" % n, "shape": "endmill.fcstd",
+                "shape-type": "Endmill", "attribute": {},
+                "parameter": {"Diameter": "%.2f mm" % n}}}},
+        }])["items"][0]
+        ids.append(r["id"])
+    ts = server.create_tool_sets([{
+        "name": "Set A", "tool_record_ids": ids, "extra": {"freecad": {}}}])["items"][0]
+
+    plan = sync.plan_sync(str(tmp_path), server)
+    by = plan_by_key(plan)
+    lib = by["server-lib:%s" % ts["id"]]
+    for rid in ids:
+        bit = by["server:%s" % rid]
+        assert bit["action"] == "new_server"
+        assert bit["group"] == lib["group"]          # grouped under the library
+
+    before_records, before_sets = set(server.records), set(server.tool_sets)
+    decisions = {i["key"]: "pull" for i in plan["items"]}
+    shapes = {"server:%s" % ids[0]: "drill", "server:%s" % ids[1]: "probe"}
+    summary = sync.apply_sync(str(tmp_path), server, plan, decisions, shapes=shapes)
+
+    assert set(server.records) == before_records, "pull must NOT create server records"
+    assert set(server.tool_sets) == before_sets, "pull must NOT create tool sets"
+    assert summary["pushed"] == 0
+    assert summary["pulled"] >= 3
+    docs = {read(p).get("name"): read(p) for p in (tmp_path / "Bit").glob("*.fctb")}
+    assert docs["T1"]["smooth"]["record_id"] == ids[0]   # stays linked
+    assert docs["T1"]["shape"] == "drill.fcstd"           # chosen type applied
+    assert docs["T2"]["shape"] == "probe.fcstd"
