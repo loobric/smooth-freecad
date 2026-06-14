@@ -38,44 +38,33 @@ INT_PARAMS = {
     "Flutes": "flutes",
 }
 
-# Per-shape .fctb template, keyed by the lowercased shape-type (which is also
-# what geometry.shape stores). Each entry is (shape_file, shape_type, schema).
-# The shape IS the schema: FreeCAD reads `shape-type` and the parameter set to
-# build the bit, and a document missing them collapses to a generic endmill —
-# so synthesizing a tool means emitting its EXACT type string and full
-# parameter schema (geometry values overlay onto these defaults), not just a
-# diameter. Note the names are FreeCAD's own: shape-type "VBit" (not "V-bit"),
-# file "v-bit.fcstd". Defaults are placeholders the user refines in FreeCAD.
-SHAPE_TEMPLATES = {
-    "endmill": ("endmill.fcstd", "Endmill", {
-        "Chipload": "0.00 mm", "CuttingEdgeHeight": "14.00 mm", "Diameter": "6.00 mm",
-        "Flutes": 2, "Length": "50.00 mm", "Material": "HSS",
-        "ShankDiameter": "6.00 mm", "SpindleDirection": "Forward"}),
-    "ballend": ("ballend.fcstd", "Ballend", {
-        "Chipload": "0.00 mm", "CuttingEdgeHeight": "10.00 mm", "Diameter": "6.00 mm",
-        "Flutes": 2, "Length": "50.00 mm", "Material": "HSS",
-        "ShankDiameter": "6.00 mm", "SpindleDirection": "Forward"}),
-    "vbit": ("v-bit.fcstd", "VBit", {
-        "CuttingEdgeAngle": "60.00 °", "CuttingEdgeHeight": "1.00 mm",
-        "Diameter": "10.00 mm", "TipDiameter": "0.10 mm", "Length": "20.00 mm",
-        "ShankDiameter": "6.00 mm"}),
-    "drill": ("drill.fcstd", "Drill", {
-        "Chipload": "0.00 mm", "Diameter": "5.00 mm", "Flutes": 0,
-        "Length": "50.00 mm", "Material": "HSS", "SpindleDirection": "Forward",
-        "TipAngle": "118.00 °"}),
-    "probe": ("probe.fcstd", "Probe", {
-        "Diameter": "6.00 mm", "Length": "50.00 mm", "ShaftDiameter": "4.00 mm"}),
-    "slittingsaw": ("slittingsaw.fcstd", "SlittingSaw", {
-        "BladeThickness": "3.00 mm", "CapHeight": "3.00 mm", "CapDiameter": "8.00 mm",
-        "Diameter": "76.20 mm", "Length": "50.00 mm", "ShankDiameter": "19.05 mm"}),
-    "threadmill": ("thread-mill.fcstd", "ThreadMill", {
-        "Chipload": "0.00 mm", "Crest": "0.10 mm", "Diameter": "6.00 mm", "Flutes": 0,
-        "Length": "60.00 mm", "Material": "HSS", "NeckDiameter": "4.10 mm",
-        "NeckLength": "20.00 mm", "ShankDiameter": "6.00 mm",
-        "SpindleDirection": "Forward", "cuttingAngle": "60.00 °"}),
+# FreeCAD CAM tool shapes, keyed by the lowercased shape-type (which is also
+# what geometry.shape stores). Each entry is (shape_file, shape_type), mirrored
+# verbatim from FreeCAD's authoritative model definitions
+# (Mod/CAM/Path/Tool/{toolbit,shape}/models). FreeCAD resolves a bit's TYPE and
+# full parameter schema from the `shape` file's id (the .fcstd stem) — so all
+# that a synthesized .fctb must get right is the exact file and shape-type; the
+# shape asset supplies the schema and sensible defaults, which the record's
+# geometry then overlays. Note FreeCAD's own irregular names: type "VBit" with
+# file "v-bit.fcstd", "ThreadMill" with "thread-mill.fcstd", "TaperedBallNose".
+SHAPE_DEFS = {
+    "endmill": ("endmill.fcstd", "Endmill"),
+    "ballend": ("ballend.fcstd", "Ballend"),
+    "bullnose": ("bullnose.fcstd", "Bullnose"),
+    "chamfer": ("chamfer.fcstd", "Chamfer"),
+    "dovetail": ("dovetail.fcstd", "Dovetail"),
+    "drill": ("drill.fcstd", "Drill"),
+    "probe": ("probe.fcstd", "Probe"),
+    "radius": ("radius.fcstd", "Radius"),
+    "reamer": ("reamer.fcstd", "Reamer"),
+    "slittingsaw": ("slittingsaw.fcstd", "SlittingSaw"),
+    "tap": ("tap.fcstd", "Tap"),
+    "taperedballnose": ("taperedballnose.fcstd", "TaperedBallNose"),
+    "threadmill": ("thread-mill.fcstd", "ThreadMill"),
+    "vbit": ("v-bit.fcstd", "VBit"),
 }
 DEFAULT_SHAPE = "endmill"
-FREECAD_SHAPES = list(SHAPE_TEMPLATES)
+FREECAD_SHAPES = list(SHAPE_DEFS)
 
 
 def record_shape(record):
@@ -204,16 +193,17 @@ def record_to_fctb(record, shape=None):
         doc = copy.deepcopy(base)
     else:
         chosen = shape or current or DEFAULT_SHAPE
-        shape_file, shape_type, template = SHAPE_TEMPLATES.get(
-            chosen, (chosen + ".fcstd", chosen.capitalize(), {}))
+        shape_file, shape_type = SHAPE_DEFS.get(
+            chosen, (chosen + ".fcstd", chosen.capitalize()))
         doc = {
             "version": 2,
             "name": record.get("name", ""),
             "shape": shape_file,
             "shape-type": shape_type,
             "attribute": {},
-            # Full schema for the type; geometry (Diameter, ...) overlays below.
-            "parameter": dict(template),
+            # FreeCAD fills the shape's schema/defaults from the shape file;
+            # the record's geometry (Diameter, ...) overlays below.
+            "parameter": {},
         }
 
     doc["name"] = record.get("name", doc.get("name", ""))

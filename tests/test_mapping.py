@@ -203,20 +203,38 @@ def test_record_to_fctb_preserves_base_when_shape_matches_or_unset():
 
 
 @pytest.mark.unit
-def test_synthesized_tool_carries_the_shapes_full_schema():
-    """The crux: a synthesized bit must emit the shape's EXACT type string and
-    full parameter schema, else FreeCAD can't build it and shows an endmill."""
-    doc = record_to_fctb({"id": "r", "name": "60deg", "geometry": {"diameter": 10.0},
-                          "extra": {}}, shape="vbit")
-    assert doc["shape"] == "v-bit.fcstd"
-    assert doc["shape-type"] == "VBit"                       # exact, not 'V-bit'
-    assert set(doc["parameter"]) >= {"CuttingEdgeAngle", "TipDiameter", "ShankDiameter"}
+def test_synthesized_tool_uses_authoritative_shape_file_and_type():
+    """The crux: a synthesized bit must name the exact shape FILE and TYPE that
+    FreeCAD's models define — FreeCAD resolves type+schema from the shape file,
+    so a wrong/missing one collapses to a generic endmill. Covers the irregular
+    names too (v-bit.fcstd/VBit, thread-mill.fcstd/ThreadMill, TaperedBallNose).
+    """
+    from freecad.Smooth.mapping import SHAPE_DEFS
+    cases = {"vbit": ("v-bit.fcstd", "VBit"),
+             "threadmill": ("thread-mill.fcstd", "ThreadMill"),
+             "taperedballnose": ("taperedballnose.fcstd", "TaperedBallNose"),
+             "probe": ("probe.fcstd", "Probe"),
+             "reamer": ("reamer.fcstd", "Reamer"),
+             "dovetail": ("dovetail.fcstd", "Dovetail")}
+    for key, (shape_file, shape_type) in cases.items():
+        assert SHAPE_DEFS[key] == (shape_file, shape_type)
+        doc = record_to_fctb({"id": "r", "name": "x", "geometry": {"diameter": 6.0},
+                              "extra": {}}, shape=key)
+        assert doc["shape"] == shape_file
+        assert doc["shape-type"] == shape_type
+        assert doc["parameter"]["Diameter"].startswith("6")   # geometry overlaid
 
-    probe = record_to_fctb({"id": "p", "name": "Probe", "geometry": {"diameter": 3.0},
-                            "extra": {}}, shape="probe")
-    assert probe["shape-type"] == "Probe"
-    assert set(probe["parameter"]) >= {"Diameter", "Length", "ShaftDiameter"}
-    assert probe["parameter"]["Diameter"].startswith("3")   # geometry overlaid
+
+@pytest.mark.unit
+def test_all_freecad_shapes_are_offered():
+    """The picker covers every shape model FreeCAD ships, not a hand-picked
+    subset (Probe, Drill, V-Bit, Bullnose, Chamfer, Dovetail, Radius, Reamer,
+    Tap, Tapered Ball-nose, Slitting Saw, Thread Mill, Ball-end, End Mill)."""
+    from freecad.Smooth.mapping import FREECAD_SHAPES
+    assert set(FREECAD_SHAPES) >= {
+        "endmill", "ballend", "bullnose", "chamfer", "dovetail", "drill",
+        "probe", "radius", "reamer", "slittingsaw", "tap", "taperedballnose",
+        "threadmill", "vbit"}
 
 
 @pytest.mark.unit
