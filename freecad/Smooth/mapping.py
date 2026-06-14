@@ -38,6 +38,27 @@ INT_PARAMS = {
     "Flutes": "flutes",
 }
 
+# FreeCAD CAM tool shapes. Each maps to a <shape>.fcstd shape file; the shape
+# IS the schema (it fixes which parameters a bit has) and FreeCAD locks it at
+# creation — so a record with no shape of its own must have one chosen BEFORE
+# its .fctb is written, never after. endmill is the historical default.
+DEFAULT_SHAPE = "endmill"
+FREECAD_SHAPES = [
+    "endmill", "ballend", "bullnose", "v-bit", "chamfer", "drill",
+    "probe", "slittingsaw", "thread-mill", "dovetail", "engraver",
+]
+
+
+def record_has_freecad_shape(record):
+    """True when the record already names a tool shape — from a .fctb it came
+    from, or from geometry.shape. Such a record needs no type choice on import
+    (and its shape can't be changed afterward anyway)."""
+    base = (record.get("extra") or {}).get("freecad", {}).get("fctb")
+    if base and (base.get("shape") or base.get("shape-type")):
+        return True
+    return bool((record.get("geometry") or {}).get("shape"))
+
+
 _QUANTITY_RE = re.compile(r"^\s*([+-]?\d+(?:\.\d+)?)\s*(\S*)\s*$")
 
 
@@ -115,8 +136,14 @@ def fctb_to_record(fctb):
     return payload, smooth_meta.get("record_id")
 
 
-def record_to_fctb(record):
+def record_to_fctb(record, shape=None):
     """Regenerate a .fctb document from a ToolRecord.
+
+    Args:
+        shape: tool shape to use when SYNTHESIZING a document for a record
+            that has no FreeCAD origin and no geometry.shape (e.g. a tool
+            that came from a machine table). Ignored when the record already
+            carries a shape, since FreeCAD fixes a bit's shape at creation.
 
     Assumptions:
     - The verbatim original in extra["freecad"]["fctb"] is the base, so
@@ -126,7 +153,7 @@ def record_to_fctb(record):
       (lossless rule — formatting never churns)
     - The additive 'smooth' key records identity for the next export
     - Records that never came from FreeCAD get a minimal document built
-      from geometry
+      from geometry, with the caller's chosen shape (default endmill)
     """
     base = (record.get("extra") or {}).get("freecad", {}).get("fctb")
     geometry = record.get("geometry") or {}
@@ -134,11 +161,12 @@ def record_to_fctb(record):
     if base:
         doc = copy.deepcopy(base)
     else:
+        chosen = shape or geometry.get("shape") or DEFAULT_SHAPE
         doc = {
             "version": 2,
             "name": record.get("name", ""),
-            "shape": (geometry.get("shape", "endmill")) + ".fcstd",
-            "shape-type": geometry.get("shape", "endmill").capitalize(),
+            "shape": chosen + ".fcstd",
+            "shape-type": chosen.capitalize(),
             "attribute": {},
             "parameter": {},
         }

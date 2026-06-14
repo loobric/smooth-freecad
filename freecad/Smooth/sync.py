@@ -745,7 +745,16 @@ class SyncApplyError(Exception):
     """Apply-time failure for one item (others proceed)."""
 
 
-def apply_sync(tools_dir, client, plan, decisions, log=lambda msg: None):
+def needs_shape_choice(item):
+    """A bit whose import would SYNTHESIZE a .fctb — the server record has no
+    FreeCAD shape of its own — lets the user pick the tool type first, because
+    FreeCAD fixes a bit's shape at creation and it can't be changed after."""
+    record = item.get("record")
+    return (item.get("kind") == "bit" and record is not None
+            and not mapping.record_has_freecad_shape(record))
+
+
+def apply_sync(tools_dir, client, plan, decisions, shapes=None, log=lambda msg: None):
     """Execute selected plan items.
 
     Args:
@@ -756,6 +765,8 @@ def apply_sync(tools_dir, client, plan, decisions, log=lambda msg: None):
             "push" uploads the local version (force, using the server's
             current version - an explicit human decision); "pull" writes
             the server version over the local file.
+        shapes: {item_key: shape} chosen tool type for shapeless records
+            being downloaded; applied only when synthesizing a new .fctb.
 
     Returns {"pushed": n, "pulled": n, "skipped": n, "errors": [...]}.
 
@@ -767,6 +778,7 @@ def apply_sync(tools_dir, client, plan, decisions, log=lambda msg: None):
     """
     summary = {"pushed": 0, "pulled": 0, "skipped": 0, "deleted": 0,
                "errors": []}
+    shapes = shapes or {}
     state = _load_sync_state(tools_dir)
     by_key = {i["key"]: i for i in plan["items"]}
     bit_dir = os.path.join(tools_dir, "Bit")
@@ -806,7 +818,7 @@ def apply_sync(tools_dir, client, plan, decisions, log=lambda msg: None):
             log("uploaded %s" % item["basename"])
 
     def pull_bit(item):
-        regenerated = mapping.record_to_fctb(item["record"])
+        regenerated = mapping.record_to_fctb(item["record"], shape=shapes.get(item["key"]))
         path = item["path"]
         if not path:
             meta = (item["record"].get("extra") or {}).get("freecad", {})

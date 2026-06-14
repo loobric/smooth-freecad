@@ -405,3 +405,56 @@ def test_legacy_library_id_key_and_journal_still_match(tools_dir):
     assert len(server.tool_sets) == 1        # NO duplicate
     assert read(fctl_path)["smooth"].get("tool_set_id") == set_id
     assert "tool_sets" in json.loads(state_path.read_text())
+
+
+@pytest.mark.unit
+def test_import_synthesizes_chosen_tool_type(tools_dir):
+    """A server-only tool with no FreeCAD shape offers a type choice, and the
+    download synthesizes the .fctb with the chosen shape (not always endmill)."""
+    server = FakeServer()
+    server.records["rec-x"] = {
+        "id": "rec-x", "version": 1, "name": "Mystery 6mm",
+        "geometry": {"diameter": 6.0, "diameter_unit": "mm"}, "extra": {},
+    }
+    plan = sync.plan_sync(str(tools_dir), server)
+    item = plan_by_key(plan)["server:rec-x"]
+    assert item["action"] == "new_server"
+    assert sync.needs_shape_choice(item) is True
+
+    sync.apply_sync(str(tools_dir), server, plan,
+                    {"server:rec-x": "pull"}, shapes={"server:rec-x": "drill"})
+    docs = [read(p) for p in (tools_dir / "Bit").glob("*.fctb")]
+    mystery = [d for d in docs if d.get("name") == "Mystery 6mm"]
+    assert mystery, "expected a synthesized .fctb"
+    assert mystery[0]["shape"] == "drill.fcstd"
+    assert mystery[0]["shape-type"] == "Drill"
+
+
+@pytest.mark.unit
+def test_import_defaults_to_endmill_without_a_choice(tools_dir):
+    """No shape chosen -> historical default, so behavior is unchanged for
+    callers that don't pass shapes."""
+    server = FakeServer()
+    server.records["rec-y"] = {
+        "id": "rec-y", "version": 1, "name": "Plain 3mm",
+        "geometry": {"diameter": 3.0}, "extra": {},
+    }
+    plan = sync.plan_sync(str(tools_dir), server)
+    sync.apply_sync(str(tools_dir), server, plan, {"server:rec-y": "pull"})
+    docs = [read(p) for p in (tools_dir / "Bit").glob("*.fctb")]
+    plain = [d for d in docs if d.get("name") == "Plain 3mm"][0]
+    assert plain["shape"] == "endmill.fcstd"
+
+
+@pytest.mark.unit
+def test_freecad_originated_bit_offers_no_type_choice(tools_dir):
+    """A bit that already has a FreeCAD shape must NOT offer a type choice."""
+    server = FakeServer()
+    plan = sync.plan_sync(str(tools_dir), server)
+    # every local bit pushed up carries its .fctb (and thus a shape)
+    decisions = {i["key"]: "push" for i in plan["items"] if i["kind"] == "bit"}
+    sync.apply_sync(str(tools_dir), server, plan, decisions)
+    plan2 = sync.plan_sync(str(tools_dir), server)
+    for i in plan2["items"]:
+        if i["kind"] == "bit":
+            assert sync.needs_shape_choice(i) is False

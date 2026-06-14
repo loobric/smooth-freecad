@@ -20,7 +20,7 @@ from typing import Dict
 import FreeCAD as App
 from PySide import QtGui, QtCore
 
-from . import sync
+from . import sync, mapping
 from .client import SmoothClient, SmoothError
 
 
@@ -123,9 +123,10 @@ class SmoothSyncDialog:
         layout.addLayout(server_row)
 
         self.tree = QtGui.QTreeWidget()
-        self.tree.setHeaderLabels(["Item", "Status", "Action"])
-        self.tree.setColumnWidth(0, 280)
-        self.tree.setColumnWidth(1, 170)
+        self.tree.setHeaderLabels(["Item", "Status", "Action", "Tool type"])
+        self.tree.setColumnWidth(0, 250)
+        self.tree.setColumnWidth(1, 150)
+        self.tree.setColumnWidth(2, 150)
         self.tree.itemSelectionChanged.connect(self._show_diff)
         layout.addWidget(self.tree, stretch=3)
 
@@ -176,6 +177,7 @@ class SmoothSyncDialog:
     def refresh_plan(self):
         self.tree.clear()
         self._row_widgets = {}
+        self._shape_widgets = {}
         try:
             self._client().ping()
             self.status_label.setText("✓ connected")
@@ -245,6 +247,16 @@ class SmoothSyncDialog:
                 combo.model().item(2).setEnabled(False)   # nothing on server
         self.tree.setItemWidget(row, 2, combo)
         self._row_widgets[item["key"]] = combo
+        # Server-originated tools have no FreeCAD shape; let the user pick the
+        # tool type BEFORE the .fctb is synthesized (FreeCAD locks it after).
+        if sync.needs_shape_choice(item):
+            shape_combo = QtGui.QComboBox()
+            shape_combo.addItems(mapping.FREECAD_SHAPES)
+            shape_combo.setToolTip(
+                "Tool type to create on download. FreeCAD can't change a "
+                "bit's type after it's created, so choose it here.")
+            self.tree.setItemWidget(row, 3, shape_combo)
+            self._shape_widgets[item["key"]] = shape_combo
         return 1
 
     def _set_all(self, default):
@@ -287,6 +299,10 @@ class SmoothSyncDialog:
                 decisions[key] = self.DECISIONS[combo.currentIndex()]
         return decisions
 
+    def _collect_shapes(self):
+        return {key: combo.currentText()
+                for key, combo in self._shape_widgets.items()}
+
     def _run_apply(self):
         decisions = self._collect_decisions()
         if not decisions:
@@ -295,7 +311,9 @@ class SmoothSyncDialog:
         self.apply_button.setEnabled(False)
         try:
             summary = sync.apply_sync(str(get_tools_dir()), self._client(),
-                                      self.plan, decisions, log=self._append)
+                                      self.plan, decisions,
+                                      shapes=self._collect_shapes(),
+                                      log=self._append)
         except SmoothError as e:
             self._append(f"Apply failed: {e}")
             self.apply_button.setEnabled(True)

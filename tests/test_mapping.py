@@ -167,3 +167,42 @@ def test_member_added_server_side_gets_next_free_number():
     assert unresolved == []
     assert doc["tools"] == [{"nr": 11, "path": "a.fctb"},
                             {"nr": 12, "path": "b.fctb"}]
+
+
+# -- Tool-type choice on import (server-originated, shapeless records) --------
+#
+# A tool that reaches the server without a FreeCAD origin (e.g. from a machine
+# tool table) has no shape. FreeCAD fixes a bit's shape at creation, so the
+# client must let the user choose the type BEFORE the .fctb is synthesized.
+
+@pytest.mark.unit
+def test_record_to_fctb_uses_chosen_shape_for_shapeless_record():
+    rec = {"id": "r", "name": "Mystery 6mm", "geometry": {"diameter": 6.0}, "extra": {}}
+    doc = record_to_fctb(rec, shape="ballend")
+    assert doc["shape"] == "ballend.fcstd"
+    assert doc["shape-type"] == "Ballend"
+
+
+@pytest.mark.unit
+def test_record_to_fctb_defaults_to_endmill_when_no_choice():
+    doc = record_to_fctb({"id": "r", "name": "x", "geometry": {}, "extra": {}})
+    assert doc["shape"] == "endmill.fcstd"
+    assert doc["shape-type"] == "Endmill"
+
+
+@pytest.mark.unit
+def test_record_to_fctb_chosen_shape_ignored_when_record_came_from_freecad():
+    base = {"version": 2, "name": "x", "shape": "v-bit.fcstd",
+            "shape-type": "V-bit", "parameter": {}}
+    rec = {"id": "r", "name": "x", "geometry": {}, "extra": {"freecad": {"fctb": base}}}
+    doc = record_to_fctb(rec, shape="drill")
+    assert doc["shape"] == "v-bit.fcstd"  # FreeCAD origin wins; choice ignored
+
+
+@pytest.mark.unit
+def test_record_has_freecad_shape():
+    from freecad.Smooth.mapping import record_has_freecad_shape
+    assert record_has_freecad_shape({"geometry": {"shape": "drill"}, "extra": {}}) is True
+    assert record_has_freecad_shape(
+        {"geometry": {}, "extra": {"freecad": {"fctb": {"shape": "endmill.fcstd"}}}}) is True
+    assert record_has_freecad_shape({"geometry": {}, "extra": {}}) is False
