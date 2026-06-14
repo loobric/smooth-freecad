@@ -447,14 +447,42 @@ def test_import_defaults_to_endmill_without_a_choice(tools_dir):
 
 
 @pytest.mark.unit
-def test_freecad_originated_bit_offers_no_type_choice(tools_dir):
-    """A bit that already has a FreeCAD shape must NOT offer a type choice."""
+def test_import_corrects_a_wrongly_stamped_server_shape(tools_dir):
+    """The pollution case: a record stored on the server as an endmill stub
+    (Probe etc.) still offers a type choice on import, and choosing the right
+    type rebuilds the .fctb — endmill is not forced."""
+    server = FakeServer()
+    server.records["rec-p"] = {
+        "id": "rec-p", "version": 1, "name": "Probe",
+        "geometry": {"shape": "endmill", "diameter": 3.0},
+        "extra": {"freecad": {"fctb": {
+            "version": 2, "name": "Probe", "shape": "endmill.fcstd",
+            "shape-type": "Endmill", "attribute": {},
+            "parameter": {"Diameter": "3.00 mm"}}}},
+    }
+    plan = sync.plan_sync(str(tools_dir), server)
+    item = plan_by_key(plan)["server:rec-p"]
+    assert item["action"] == "new_server"
+    assert sync.needs_shape_choice(item) is True          # offered DESPITE endmill stamp
+
+    sync.apply_sync(str(tools_dir), server, plan,
+                    {"server:rec-p": "pull"}, shapes={"server:rec-p": "probe"})
+    docs = [read(p) for p in (tools_dir / "Bit").glob("*.fctb")]
+    probe = [d for d in docs if d.get("name") == "Probe"][0]
+    assert probe["shape"] == "probe.fcstd"                # corrected, not endmill
+    assert probe["shape-type"] == "Probe"
+
+
+@pytest.mark.unit
+def test_in_sync_bit_offers_no_type_choice(tools_dir):
+    """A bit with nothing to download (in sync / upload-only) offers no type
+    choice — the picker is for downloads only."""
     server = FakeServer()
     plan = sync.plan_sync(str(tools_dir), server)
-    # every local bit pushed up carries its .fctb (and thus a shape)
     decisions = {i["key"]: "push" for i in plan["items"] if i["kind"] == "bit"}
     sync.apply_sync(str(tools_dir), server, plan, decisions)
     plan2 = sync.plan_sync(str(tools_dir), server)
     for i in plan2["items"]:
         if i["kind"] == "bit":
+            assert i["action"] == "unchanged"
             assert sync.needs_shape_choice(i) is False

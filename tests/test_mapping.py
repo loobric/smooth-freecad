@@ -169,11 +169,12 @@ def test_member_added_server_side_gets_next_free_number():
                             {"nr": 12, "path": "b.fctb"}]
 
 
-# -- Tool-type choice on import (server-originated, shapeless records) --------
+# -- Tool-type choice on import ----------------------------------------------
 #
-# A tool that reaches the server without a FreeCAD origin (e.g. from a machine
-# tool table) has no shape. FreeCAD fixes a bit's shape at creation, so the
-# client must let the user choose the type BEFORE the .fctb is synthesized.
+# FreeCAD fixes a bit's shape at creation. A record's stored shape is
+# unreliable as a type — tools that reached the server without a FreeCAD origin
+# were stamped 'endmill' by an earlier import — so the client must let the user
+# set the type BEFORE the .fctb is written, including to CORRECT a wrong one.
 
 @pytest.mark.unit
 def test_record_to_fctb_uses_chosen_shape_for_shapeless_record():
@@ -191,18 +192,32 @@ def test_record_to_fctb_defaults_to_endmill_when_no_choice():
 
 
 @pytest.mark.unit
-def test_record_to_fctb_chosen_shape_ignored_when_record_came_from_freecad():
-    base = {"version": 2, "name": "x", "shape": "v-bit.fcstd",
-            "shape-type": "V-bit", "parameter": {}}
-    rec = {"id": "r", "name": "x", "geometry": {}, "extra": {"freecad": {"fctb": base}}}
-    doc = record_to_fctb(rec, shape="drill")
-    assert doc["shape"] == "v-bit.fcstd"  # FreeCAD origin wins; choice ignored
+def test_record_to_fctb_preserves_base_when_shape_matches_or_unset():
+    base = {"version": 2, "name": "x", "shape": "v-bit.fcstd", "shape-type": "V-bit",
+            "parameter": {"CuttingEdgeAngle": "30 °"}}
+    rec = {"id": "r", "name": "x", "geometry": {"shape": "v-bit"},
+           "extra": {"freecad": {"fctb": base}}}
+    assert record_to_fctb(rec)["shape"] == "v-bit.fcstd"             # lossless
+    assert "CuttingEdgeAngle" in record_to_fctb(rec)["parameter"]
+    assert record_to_fctb(rec, shape="v-bit")["shape"] == "v-bit.fcstd"  # same -> kept
 
 
 @pytest.mark.unit
-def test_record_has_freecad_shape():
-    from freecad.Smooth.mapping import record_has_freecad_shape
-    assert record_has_freecad_shape({"geometry": {"shape": "drill"}, "extra": {}}) is True
-    assert record_has_freecad_shape(
-        {"geometry": {}, "extra": {"freecad": {"fctb": {"shape": "endmill.fcstd"}}}}) is True
-    assert record_has_freecad_shape({"geometry": {}, "extra": {}}) is False
+def test_record_to_fctb_corrects_a_wrongly_stamped_shape():
+    # the pollution case: a Probe stored on the server as an endmill stub
+    base = {"version": 2, "name": "Probe", "shape": "endmill.fcstd",
+            "shape-type": "Endmill", "attribute": {}, "parameter": {"Diameter": "3.00 mm"}}
+    rec = {"id": "r", "name": "Probe", "geometry": {"shape": "endmill", "diameter": 3.0},
+           "extra": {"freecad": {"fctb": base}}}
+    doc = record_to_fctb(rec, shape="probe")
+    assert doc["shape"] == "probe.fcstd"      # rebuilt; endmill base discarded
+    assert doc["shape-type"] == "Probe"
+
+
+@pytest.mark.unit
+def test_record_shape_reads_geometry_then_base():
+    from freecad.Smooth.mapping import record_shape
+    assert record_shape({"geometry": {"shape": "Drill"}, "extra": {}}) == "drill"
+    assert record_shape(
+        {"geometry": {}, "extra": {"freecad": {"fctb": {"shape-type": "Endmill"}}}}) == "endmill"
+    assert record_shape({"geometry": {}, "extra": {}}) is None

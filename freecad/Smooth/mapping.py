@@ -49,14 +49,19 @@ FREECAD_SHAPES = [
 ]
 
 
-def record_has_freecad_shape(record):
-    """True when the record already names a tool shape — from a .fctb it came
-    from, or from geometry.shape. Such a record needs no type choice on import
-    (and its shape can't be changed afterward anyway)."""
+def record_shape(record):
+    """The tool shape a record currently claims (lowercase stem), or None.
+
+    Note this is unreliable as a *type*: tools that reached the server without
+    a FreeCAD origin were historically stamped 'endmill' by an earlier import,
+    so the user must be able to override it on import (see record_to_fctb)."""
+    geometry = record.get("geometry") or {}
+    if geometry.get("shape"):
+        return str(geometry["shape"]).lower()
     base = (record.get("extra") or {}).get("freecad", {}).get("fctb")
-    if base and (base.get("shape") or base.get("shape-type")):
-        return True
-    return bool((record.get("geometry") or {}).get("shape"))
+    if base and base.get("shape-type"):
+        return str(base["shape-type"]).lower()
+    return None
 
 
 _QUANTITY_RE = re.compile(r"^\s*([+-]?\d+(?:\.\d+)?)\s*(\S*)\s*$")
@@ -140,28 +145,36 @@ def record_to_fctb(record, shape=None):
     """Regenerate a .fctb document from a ToolRecord.
 
     Args:
-        shape: tool shape to use when SYNTHESIZING a document for a record
-            that has no FreeCAD origin and no geometry.shape (e.g. a tool
-            that came from a machine table). Ignored when the record already
-            carries a shape, since FreeCAD fixes a bit's shape at creation.
+        shape: the tool shape (stem like 'drill') for the generated bit.
+            FreeCAD fixes a bit's shape at creation, so this is the only
+            chance to set it. When `shape` differs from the record's stored
+            shape, the .fctb is REBUILT from geometry with the chosen shape —
+            because the stored shape is often a wrong 'endmill' default from
+            an earlier import and its document must NOT be reused. When `shape`
+            is None or matches the stored shape, the record's own verbatim
+            document is preserved (lossless).
 
     Assumptions:
     - The verbatim original in extra["freecad"]["fctb"] is the base, so
-      unknown keys (presets, attribute, ...) survive untouched
+      unknown keys (presets, attribute, ...) survive untouched — UNLESS the
+      caller is correcting the shape, which necessarily discards the old
+      shape-specific document
     - Server-side canonical edits overlay: name always; quantity/int
       parameters only when the canonical value differs from the original
       (lossless rule — formatting never churns)
     - The additive 'smooth' key records identity for the next export
-    - Records that never came from FreeCAD get a minimal document built
-      from geometry, with the caller's chosen shape (default endmill)
     """
     base = (record.get("extra") or {}).get("freecad", {}).get("fctb")
     geometry = record.get("geometry") or {}
+    current = record_shape(record)
+    # A chosen shape that differs from the stored one is an explicit correction:
+    # discard the (often wrongly-endmill) base and synthesize the chosen type.
+    rebuild = shape is not None and shape != current
 
-    if base:
+    if base and not rebuild:
         doc = copy.deepcopy(base)
     else:
-        chosen = shape or geometry.get("shape") or DEFAULT_SHAPE
+        chosen = shape or current or DEFAULT_SHAPE
         doc = {
             "version": 2,
             "name": record.get("name", ""),

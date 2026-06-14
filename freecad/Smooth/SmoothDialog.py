@@ -252,9 +252,13 @@ class SmoothSyncDialog:
         if sync.needs_shape_choice(item):
             shape_combo = QtGui.QComboBox()
             shape_combo.addItems(mapping.FREECAD_SHAPES)
+            current = mapping.record_shape(item["record"]) or mapping.DEFAULT_SHAPE
+            if current in mapping.FREECAD_SHAPES:
+                shape_combo.setCurrentIndex(mapping.FREECAD_SHAPES.index(current))
             shape_combo.setToolTip(
-                "Tool type to create on download. FreeCAD can't change a "
-                "bit's type after it's created, so choose it here.")
+                "Tool type to create on download. FreeCAD can't change a bit's "
+                "type after creation. If the server shows the wrong type (e.g. "
+                "endmill), set the correct one here to rebuild it.")
             self.tree.setItemWidget(row, 3, shape_combo)
             self._shape_widgets[item["key"]] = shape_combo
         return 1

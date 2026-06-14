@@ -746,12 +746,13 @@ class SyncApplyError(Exception):
 
 
 def needs_shape_choice(item):
-    """A bit whose import would SYNTHESIZE a .fctb — the server record has no
-    FreeCAD shape of its own — lets the user pick the tool type first, because
-    FreeCAD fixes a bit's shape at creation and it can't be changed after."""
-    record = item.get("record")
-    return (item.get("kind") == "bit" and record is not None
-            and not mapping.record_has_freecad_shape(record))
+    """A bit being created/overwritten from a server record lets the user set
+    its tool type first. FreeCAD fixes a bit's shape at creation, and a
+    record's stored shape is often a wrong 'endmill' default from an earlier
+    import — so the type must be choosable BEFORE the .fctb is written,
+    including to CORRECT an existing one. Offered on any download direction."""
+    return (item.get("kind") == "bit" and item.get("record") is not None
+            and item.get("action") in ("new_server", "pull", "conflict"))
 
 
 def apply_sync(tools_dir, client, plan, decisions, shapes=None, log=lambda msg: None):
