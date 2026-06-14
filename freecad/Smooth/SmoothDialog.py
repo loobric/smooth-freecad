@@ -182,6 +182,7 @@ class SmoothSyncDialog:
         self.tree.clear()
         self._row_widgets = {}
         self._shape_widgets = {}
+        self._guessed = 0
         try:
             self._client().ping()
             self.status_label.setText("✓ connected")
@@ -231,8 +232,12 @@ class SmoothSyncDialog:
             node.setExpanded(True)
 
         if pending:
+            extra = (f" Tool types for {self._guessed} download(s) were pre-"
+                     "filled from their names — review the 'Tool type' column "
+                     "and fix any that are wrong.") if self._guessed else ""
             self._append(f"Plan ready: {pending} item(s) need attention. "
-                         "Review, then Apply Selected.")
+                         f"Suggested directions are pre-selected.{extra} "
+                         "Adjust if needed, then Apply Selected.")
         else:
             self._append("Everything is in sync.")
         self.apply_button.setEnabled(pending > 0)
@@ -263,13 +268,18 @@ class SmoothSyncDialog:
         if sync.needs_shape_choice(item):
             shape_combo = QtGui.QComboBox()
             shape_combo.addItems(mapping.FREECAD_SHAPES)
-            current = mapping.record_shape(item["record"]) or mapping.DEFAULT_SHAPE
-            if current in mapping.FREECAD_SHAPES:
-                shape_combo.setCurrentIndex(mapping.FREECAD_SHAPES.index(current))
+            # Pre-select the type guessed from the tool's name (a record's
+            # stored shape is often a wrong 'endmill'); fall back to that shape.
+            guess = mapping.guess_shape_from_name(item["name"])
+            default = guess or mapping.record_shape(item["record"]) or mapping.DEFAULT_SHAPE
+            if default in mapping.FREECAD_SHAPES:
+                shape_combo.setCurrentIndex(mapping.FREECAD_SHAPES.index(default))
+            if guess:
+                self._guessed += 1
             shape_combo.setToolTip(
-                "Tool type to create on download. FreeCAD can't change a bit's "
-                "type after creation. If the server shows the wrong type (e.g. "
-                "endmill), set the correct one here to rebuild it.")
+                "Tool type to create on download (pre-filled from the tool "
+                "name). FreeCAD can't change a bit's type after creation, so "
+                "correct it here if the guess is wrong.")
             self.tree.setItemWidget(row, 3, shape_combo)
             self._shape_widgets[item["key"]] = shape_combo
         return 1

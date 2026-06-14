@@ -256,3 +256,28 @@ def test_record_shape_reads_geometry_then_base():
     assert record_shape(
         {"geometry": {}, "extra": {"freecad": {"fctb": {"shape-type": "Endmill"}}}}) == "endmill"
     assert record_shape({"geometry": {}, "extra": {}}) is None
+
+
+@pytest.mark.unit
+def test_guess_shape_from_name_handles_real_tool_names():
+    """Pre-fill the import type from the tool name, mirroring FreeCAD's own
+    guess. Cases are the actual names from a user's millstone library."""
+    from freecad.Smooth.mapping import guess_shape_from_name as g
+    assert g("Probe") == "probe"
+    assert g("Spot Drill") == "drill"
+    assert g("Drill") == "drill"
+    assert g("ChamferTool") == "chamfer"
+    assert g("Dovetail cutter") == "dovetail"
+    assert g("SlittingSaw") == "slittingsaw"
+    assert g("9/32\" 2 flute ball") == "ballend"        # 'ball' beats 'flute'
+    assert g("6 mm Bull Nose") == "bullnose"
+    assert g("30 Deg. V-Bit") == "vbit"
+    assert g("M8x1.25_Tap") == "tap"
+    assert g("Tapered Ball 3mm") == "taperedballnose"   # 'tapered' beats 'ball'
+    assert g("5mm-thread-cutter") == "threadmill"
+    assert g("1/8\" 2 Flute") == "endmill"              # generic flute -> endmill
+    assert g("3.175mm Endmill") == "endmill"
+    # uninformative names get no guess (caller falls back)
+    assert g("ER11 Collet") is None
+    assert g("Large Chuck") is None
+    assert g("") is None

@@ -66,6 +66,38 @@ SHAPE_DEFS = {
 DEFAULT_SHAPE = "endmill"
 FREECAD_SHAPES = list(SHAPE_DEFS)
 
+# Best-effort tool-type guess from a tool's NAME, mirroring FreeCAD's own
+# guess_subclass_from_name. A record's stored shape is unreliable (machine-
+# sourced tools were stamped a wrong 'endmill'), but the name almost always
+# says what the tool is — so this pre-selects the import type picker, turning
+# "set the type on all 17 tools" into "accept most, fix a couple". Ordered so
+# more specific keywords win (tapered before ball/tap; ball before flute).
+_SHAPE_NAME_HINTS = [
+    (("tapered ball", "taperedball", "tapered"), "taperedballnose"),
+    (("thread",), "threadmill"),
+    (("slitting", "slit saw", "slitsaw"), "slittingsaw"),
+    (("dovetail",), "dovetail"),
+    (("chamfer",), "chamfer"),
+    (("v-bit", "vbit", "v bit", "engrav"), "vbit"),
+    (("ball",), "ballend"),
+    (("bull",), "bullnose"),
+    (("probe",), "probe"),
+    (("reamer",), "reamer"),
+    (("radius", "corner round", "roundover"), "radius"),
+    (("drill",), "drill"),
+    (("tap",), "tap"),
+    (("endmill", "end mill", "flute"), "endmill"),
+]
+
+
+def guess_shape_from_name(name):
+    """Guess a tool shape key from a tool name, or None if nothing matches."""
+    text = (name or "").lower()
+    for keywords, shape in _SHAPE_NAME_HINTS:
+        if any(k in text for k in keywords):
+            return shape
+    return None
+
 
 def record_shape(record):
     """The tool shape a record currently claims (lowercase stem), or None.
