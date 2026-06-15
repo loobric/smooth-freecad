@@ -72,13 +72,21 @@ class SmoothConfigureCommand:
         }
     
     def Activated(self):
-        """Execute when command is activated."""
+        """Open the Smooth settings, which live on the CAM preference page
+        (registered by init_gui via SmoothPreferences). There is no separate
+        config dialog — the preference page is the single configuration UI."""
         try:
-            import SmoothDialog
-            dialog = SmoothDialog.SmoothConfigDialog()
-            dialog.exec_()
+            try:
+                Gui.showPreferences("CAM")
+            except TypeError:
+                # Older FreeCAD: showPreferences takes no group argument.
+                Gui.showPreferences()
         except Exception as e:
-            App.Console.PrintError(f"Failed to open Smooth config dialog: {e}\n")
+            App.Console.PrintError(f"Failed to open Smooth settings: {e}\n")
+            QtGui.QMessageBox.information(
+                None, "Configure Smooth",
+                "Open Edit → Preferences → CAM → Smooth to "
+                "configure the server URL and API key.")
     
     def IsActive(self):
         """Return True if command should be active."""

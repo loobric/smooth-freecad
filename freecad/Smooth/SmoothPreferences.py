@@ -113,43 +113,29 @@ class SmoothPreferencePage:
         self.load_settings()
     
     def test_connection(self):
-        """Test connection to Smooth server."""
-        # Always test the health endpoint at {base}/api/health
+        """Test connection to Smooth server via the same stdlib client the
+        sync uses (SmoothClient.ping hits {base}/api/health). Avoids a
+        dependency on `requests`, which FreeCAD's bundled Python may not have."""
         url = self._normalize_url(self.url_edit.text().strip())
         api_key = self.key_edit.text().strip()
-        
+
         if not url:
             self.status_label.setText("✗ Please enter a server URL")
             return
-        
+
         try:
-            import requests
-            
-            # Test health endpoint at normalized base
-            test_url = f"{url}/api/health"
-            
-            headers = {}
-            if api_key:
-                headers["Authorization"] = f"Bearer {api_key}"
-            
-            response = requests.get(test_url, headers=headers, timeout=5)
-            
-            if response.status_code == 200:
-                self.status_label.setText("✓ Connection successful!")
-                App.Console.PrintMessage(f"Successfully connected to Smooth server at {url}\n")
-            else:
-                self.status_label.setText(f"✗ Connection failed: HTTP {response.status_code}")
-                App.Console.PrintError(f"Connection failed: HTTP {response.status_code}\n")
-                
+            from freecad.Smooth.client import SmoothClient, SmoothError
         except ImportError:
-            self.status_label.setText("✗ Error: requests library not installed")
-            App.Console.PrintError("requests library not installed\n")
-        except requests.exceptions.Timeout:
-            self.status_label.setText("✗ Connection timeout - server not responding")
-            App.Console.PrintError(f"Connection timeout for {url}\n")
-        except requests.exceptions.ConnectionError:
-            self.status_label.setText("✗ Connection error - cannot reach server")
-            App.Console.PrintError(f"Cannot connect to {url}\n")
+            from client import SmoothClient, SmoothError  # flat layout
+
+        try:
+            SmoothClient(url, api_key).ping()
+            self.status_label.setText("✓ Connection successful!")
+            App.Console.PrintMessage(
+                f"Successfully connected to Smooth server at {url}\n")
+        except SmoothError as e:
+            self.status_label.setText("✗ Connection failed - cannot reach server")
+            App.Console.PrintError(f"Connection test failed for {url}: {e}\n")
         except Exception as e:
             self.status_label.setText(f"✗ Error: {str(e)}")
             App.Console.PrintError(f"Connection test failed: {str(e)}\n")

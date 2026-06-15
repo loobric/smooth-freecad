@@ -271,7 +271,7 @@ class SmoothSyncDialog:
             # Pre-select the type guessed from the tool's name (a record's
             # stored shape is often a wrong 'endmill'); fall back to that shape.
             guess = mapping.guess_shape_from_name(item["name"])
-            default = guess or mapping.record_shape(item["record"]) or mapping.DEFAULT_SHAPE
+            default = guess or sync.record_shape(item["record"]) or mapping.DEFAULT_SHAPE
             if default in mapping.FREECAD_SHAPES:
                 shape_combo.setCurrentIndex(mapping.FREECAD_SHAPES.index(default))
             if guess:

@@ -119,6 +119,12 @@ class SmoothClient:
         return [self.assert_instance(record_id, path, value, actor)
                 for path, value in asserts]
 
+    def delete_instance(self, record_id):
+        """Delete an instance record. The server unbinds any slot holding it
+        first (the slot keeps its data), so this never orphans a binding.
+        Returns ``{"deleted": <id>}``."""
+        return self._call("DELETE", "%s/%s" % (self.INSTANCES, record_id))
+
     # -- ToolSets (one per .fctl) -------------------------------------------
 
     def list_sets(self):
@@ -162,3 +168,8 @@ class SmoothClient:
         machine's slots (surfacing, not silently renumbering, the cases it
         cannot infer)."""
         return self._call("POST", "%s/%s/reconcile" % (self.SETS, record_id))
+
+    def delete_set(self, record_id):
+        """Delete a tool set. The member instances are NOT deleted — only the
+        collection. Returns ``{"deleted": <id>}``."""
+        return self._call("DELETE", "%s/%s" % (self.SETS, record_id))

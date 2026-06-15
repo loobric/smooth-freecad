@@ -12,80 +12,130 @@ import pytest
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
+def _set_path(canonical, path, field):
+    """Fold a dotted ``path`` -> ``field`` into a nested canonical dict,
+    exactly as smooth-core's assert door does."""
+    node = canonical
+    parts = path.split(".")
+    for part in parts[:-1]:
+        node = node.setdefault(part, {})
+    node[parts[-1]] = field
+    return canonical
+
+
 class FakeServer:
-    """In-memory stand-in honoring the facade bulk contract."""
+    """In-memory stand-in for the sectioned tool-schema endpoints.
+
+    Mirrors :class:`freecad.Smooth.client.SmoothClient` method-for-method and
+    returns ``{internal, canonical, clients}`` records the way smooth-core's
+    ``_response`` does: create/get/list/put-section/assert/members all return
+    the full record; delete returns ``{"deleted": id}``. Canonical values are
+    provenance-tagged Fields (``{value, source}``); a set's per-tool numbers are
+    promoted into ``canonical.members`` as Fields (§7.4).
+    """
 
     def __init__(self):
-        self.records = {}
-        self.tool_sets = {}
+        self.instances = {}   # id -> sectioned record
+        self.sets = {}        # id -> sectioned record
         self._n = 0
 
     def _next(self, prefix):
         self._n += 1
         return "%s-%d" % (prefix, self._n)
 
-    def list_records(self):
-        return list(self.records.values())
+    @staticmethod
+    def _blank(rid):
+        return {"internal": {"id": rid, "version": 1,
+                             "created_at": "t0", "updated_at": "t0"},
+                "canonical": {}, "clients": {}}
 
-    def create_records(self, items):
-        out = []
-        for item in items:
-            rid = self._next("rec")
-            self.records[rid] = {**item, "id": rid, "version": 1}
-            out.append(self.records[rid])
-        return {"success_count": len(out), "errors": [], "items": out}
+    @staticmethod
+    def _section(client_version, client_item_id, data):
+        return {"client_version": client_version or "0.2.0",
+                "client_item_id": client_item_id,
+                "created_at": "t0", "updated_at": "t0",
+                "data": data or {}}
 
-    def update_records(self, items):
-        out, errors = [], []
-        for i, item in enumerate(items):
-            current = self.records.get(item["id"])
-            if current is None:
-                errors.append({"index": i, "message": "not found"})
-                continue
-            if current["version"] != item["version"]:
-                errors.append({"index": i, "message": "Version conflict"})
-                continue
-            current.update({k: v for k, v in item.items() if k != "version"})
-            current["version"] += 1
-            out.append(current)
-        return {"success_count": len(out), "errors": errors, "items": out}
+    # -- ToolInstanceRecords --------------------------------------------------
 
-    def delete_records(self, ids):
-        n = 0
-        for rid in ids:
-            if rid in self.records:
-                del self.records[rid]; n += 1
-        return {"success_count": n, "errors": [], "items": []}
+    def list_instances(self):
+        return list(self.instances.values())
 
-    def delete_tool_sets(self, ids):
-        n = 0
-        for lid in ids:
-            if lid in self.tool_sets:
-                del self.tool_sets[lid]; n += 1
-        return {"success_count": n, "errors": [], "items": []}
+    def get_instance(self, record_id):
+        return self.instances[record_id]
 
-    def list_tool_sets(self):
-        return list(self.tool_sets.values())
+    def create_instance(self, data=None, client_item_id=None):
+        rid = self._next("rec")
+        rec = self._blank(rid)
+        if data is not None or client_item_id is not None:
+            rec["clients"]["freecad"] = self._section("0.2.0", client_item_id, data)
+        self.instances[rid] = rec
+        return rec
 
-    def create_tool_sets(self, items):
-        out = []
-        for item in items:
-            lid = self._next("lib")
-            self.tool_sets[lid] = {**item, "id": lid, "version": 1}
-            out.append(self.tool_sets[lid])
-        return {"success_count": len(out), "errors": [], "items": out}
+    def put_instance_section(self, record_id, data, client_item_id=None):
+        rec = self.instances[record_id]
+        rec["clients"]["freecad"] = self._section("0.2.0", client_item_id, data)
+        rec["internal"]["version"] += 1
+        return rec
 
-    def update_tool_sets(self, items):
-        out, errors = [], []
-        for i, item in enumerate(items):
-            current = self.tool_sets.get(item["id"])
-            if current is None:
-                errors.append({"index": i, "message": "not found"})
-                continue
-            current.update({k: v for k, v in item.items() if k != "version"})
-            current["version"] += 1
-            out.append(current)
-        return {"success_count": len(out), "errors": errors, "items": out}
+    def assert_instance(self, record_id, path, value, actor="freecad"):
+        rec = self.instances[record_id]
+        _set_path(rec["canonical"], path,
+                  {"value": value, "source": "asserted:%s" % actor})
+        rec["internal"]["version"] += 1
+        return rec
+
+    def assert_instance_fields(self, record_id, asserts, actor="freecad"):
+        return [self.assert_instance(record_id, p, v, actor) for p, v in asserts]
+
+    def delete_instance(self, record_id):
+        self.instances.pop(record_id, None)
+        return {"deleted": record_id}
+
+    # -- ToolSets -------------------------------------------------------------
+
+    def list_sets(self):
+        return list(self.sets.values())
+
+    def get_set(self, record_id):
+        return self.sets[record_id]
+
+    def create_set(self, data=None, client_item_id=None):
+        sid = self._next("set")
+        rec = self._blank(sid)
+        if data is not None or client_item_id is not None:
+            rec["clients"]["freecad"] = self._section("0.2.0", client_item_id, data)
+        self.sets[sid] = rec
+        return rec
+
+    def put_set_section(self, record_id, data, client_item_id=None):
+        rec = self.sets[record_id]
+        rec["clients"]["freecad"] = self._section("0.2.0", client_item_id, data)
+        rec["internal"]["version"] += 1
+        return rec
+
+    def assert_set(self, record_id, path, value, actor="freecad"):
+        rec = self.sets[record_id]
+        _set_path(rec["canonical"], path,
+                  {"value": value, "source": "asserted:%s" % actor})
+        rec["internal"]["version"] += 1
+        return rec
+
+    def set_members(self, record_id, members, actor="freecad"):
+        rec = self.sets[record_id]
+        rec["canonical"]["members"] = [
+            {"tool_record_id": m["tool_record_id"],
+             "number": {"value": m.get("number"), "source": "asserted:%s" % actor}}
+            for m in members]
+        rec["internal"]["version"] += 1
+        return rec
+
+    def reconcile_set(self, record_id):
+        return self.sets[record_id]
+
+    def delete_set(self, record_id):
+        self.sets.pop(record_id, None)
+        return {"deleted": record_id}
 
 
 @pytest.fixture
