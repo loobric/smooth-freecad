@@ -3,28 +3,40 @@
 # SPDX-License-Identifier: MIT
 
 """
-Mapping between FreeCAD file formats and the Smooth v2 facade.
+Mapping between FreeCAD file formats and the Smooth **sectioned** tool schema
+(docs/TOOL_SCHEMA.md). Pure functions, no FreeCAD imports — fully testable
+headless.
 
-Pure functions, no FreeCAD imports — fully testable headless. This module
-implements the v2 client contract (smooth-freecad#5):
+The model in one line: every entity has three sections — server-owned
+``internal``, provenance-tagged ``canonical`` (the agreed truth), and a map of
+per-client sections each with an opaque, client-owned ``data`` payload. A
+routine client *sync* writes only its own ``clients.freecad.data``; canonical
+facts are changed deliberately through the **assert** door.
 
-- .fctb (tool bit)  <-> ToolRecord, lossless: the full original document
-  travels in ToolRecord.extra["freecad"]["fctb"], so keys this client
-  doesn't model (notably FreeCAD's additive F&S "presets" key) survive
-  the round trip untouched.
-- .fctl (library)   <-> Library, lossless: per-tool numbers (nr) and the
-  label travel in Library.extra["freecad"].
-- Identity: after first export the server record id is written into the
-  .fctb as an additive top-level "smooth" key (older readers ignore it,
-  same mechanism FreeCAD's presets use). NO name-matching heuristics on
-  the CAM side, ever.
+This module's job is the FreeCAD <-> sections translation:
 
-Lossless rule for regeneration: a parameter string from the original file
-is kept verbatim unless the server-side canonical value actually differs —
-so formatting quirks ("3.175 mm") never churn.
+- ``.fctb`` (a tool bit)     -> a **ToolInstanceRecord**.
+  The full original document rides verbatim in ``clients.freecad.data.fctb``
+  (lossless — unknown keys like FreeCAD's F&S "presets" survive). The
+  shape/type and dimensions are surfaced as canonical **asserts** (FreeCAD is
+  the client whose scope permits asserting ``geometry.shape``). Nothing is
+  fabricated: a value we can't determine is simply not asserted.
+- ``.fctl`` (a tool library) -> a **ToolSet**.
+  Per-tool numbers are promoted OUT of the client section into canonical
+  ``members`` (a set's numbering is shared truth, §7.4); the FreeCAD label and
+  format version stay in ``clients.freecad.data``.
+- Identity: after first contact the server's ``internal.id`` is persisted
+  client-side as the additive ``smooth.record_id`` key in the ``.fctb``/``.fctl``
+  (older readers ignore it). ``client_item_id`` (the ``.fctb`` id / ``.fctl``
+  label) is the re-adoption fallback the server holds.
+
+Lossless regeneration rule: a parameter string from the original file is kept
+verbatim unless the canonical value actually differs — so formatting quirks
+("3.175 mm") never churn.
 """
 import copy
 import re
+from collections import namedtuple
 
 # parameter name -> canonical geometry key (quantity-valued)
 QUANTITY_PARAMS = {
@@ -39,8 +51,8 @@ INT_PARAMS = {
 }
 
 # FreeCAD CAM tool shapes, keyed by the lowercased shape-type (which is also
-# what geometry.shape stores). Each entry is (shape_file, shape_type), mirrored
-# verbatim from FreeCAD's authoritative model definitions
+# what canonical geometry.shape stores). Each entry is (shape_file, shape_type),
+# mirrored verbatim from FreeCAD's authoritative model definitions
 # (Mod/CAM/Path/Tool/{toolbit,shape}/models). FreeCAD resolves a bit's TYPE and
 # full parameter schema from the `shape` file's id (the .fcstd stem) — so all
 # that a synthesized .fctb must get right is the exact file and shape-type; the
@@ -65,6 +77,10 @@ SHAPE_DEFS = {
 }
 DEFAULT_SHAPE = "endmill"
 FREECAD_SHAPES = list(SHAPE_DEFS)
+
+# The client identity this module maps to (the `clients` map key) and the
+# default actor stamped on its assertions.
+CLIENT_NAME = "freecad"
 
 # Best-effort tool-type guess from a tool's NAME, mirroring FreeCAD's own
 # guess_subclass_from_name. A record's stored shape is unreliable (machine-
@@ -99,19 +115,14 @@ def guess_shape_from_name(name):
     return None
 
 
-def record_shape(record):
-    """The tool shape a record currently claims (lowercase stem), or None.
+def fctb_shape(fctb_doc):
+    """The shape a parsed .fctb document declares (lowercased stem), or None.
 
     Note this is unreliable as a *type*: tools that reached the server without
     a FreeCAD origin were historically stamped 'endmill' by an earlier import,
-    so the user must be able to override it on import (see record_to_fctb)."""
-    geometry = record.get("geometry") or {}
-    if geometry.get("shape"):
-        return str(geometry["shape"]).lower()
-    base = (record.get("extra") or {}).get("freecad", {}).get("fctb")
-    if base and base.get("shape-type"):
-        return str(base["shape-type"]).lower()
-    return None
+    so the user must be able to override/correct it on import."""
+    shape_type = (fctb_doc or {}).get("shape-type")
+    return str(shape_type).lower() if shape_type else None
 
 
 _QUANTITY_RE = re.compile(r"^\s*([+-]?\d+(?:\.\d+)?)\s*(\S*)\s*$")
@@ -144,120 +155,163 @@ def format_quantity(value, unit):
     return f"{text} {unit}".strip()
 
 
+def _field_value(field):
+    """Read the ``value`` out of a provenance-tagged canonical Field.
+
+    Accepts a raw value too, so callers can be lenient about whether a number
+    arrived already wrapped ({"value": .., "source": ..}) or bare."""
+    if isinstance(field, dict):
+        return field.get("value")
+    return field
+
+
 # ---------------------------------------------------------------------------
-# .fctb <-> ToolRecord
+# .fctb <-> ToolInstanceRecord
 # ---------------------------------------------------------------------------
 
-def fctb_to_record(fctb):
-    """Map a parsed .fctb document to a ToolRecord payload.
+# The pieces a client sends to materialize a ToolInstanceRecord:
+#   data           -> the clients.freecad.data payload (lossless .fctb)
+#   client_item_id -> the envelope's re-adoption handle
+#   asserts        -> the canonical facts to declare, as (path, value) tuples
+InstanceSections = namedtuple(
+    "InstanceSections", ["data", "client_item_id", "asserts"])
 
-    Returns (payload, record_id): record_id is the server id from a prior
-    export (the additive 'smooth' key), or None for a never-synced bit.
 
-    Assumptions:
-    - geometry carries the canonical keys the server needs (binding
-      heuristics use geometry.diameter); everything else rides verbatim
-      in extra["freecad"]["fctb"]
-    - the 'smooth' key itself is stripped from the stored copy (it's
-      identity plumbing, not tool data)
-    """
-    doc = copy.deepcopy(fctb)
-    smooth_meta = doc.pop("smooth", None) or {}
-
-    geometry = {}
-    shape_type = doc.get("shape-type")
-    if shape_type:
-        geometry["shape"] = str(shape_type).lower()
-    params = doc.get("parameter", {}) or {}
+def _geometry_asserts(params):
+    """Canonical geometry asserts (path, value) extracted from .fctb params."""
+    out = []
     for param, key in QUANTITY_PARAMS.items():
         if param in params:
-            value, unit = parse_quantity(params[param])
+            value, _unit = parse_quantity(params[param])
             if value is not None:
-                geometry[key] = value
-                if unit:
-                    geometry[key + "_unit"] = unit
+                out.append(("geometry." + key, value))
     for param, key in INT_PARAMS.items():
         if param in params:
             try:
-                geometry[key] = int(params[param])
+                out.append(("geometry." + key, int(params[param])))
             except (TypeError, ValueError):
                 pass
-
-    payload = {
-        "name": doc.get("name") or doc.get("id") or "unnamed tool",
-        "geometry": geometry,
-        "extra": {"freecad": {"fctb": doc}},
-    }
-    return payload, smooth_meta.get("record_id")
+    return out
 
 
-def record_to_fctb(record, shape=None):
-    """Regenerate a .fctb document from a ToolRecord.
+def fctb_record_id(fctb_doc):
+    """The server record id a prior export wrote into the .fctb, or None.
 
-    Args:
-        shape: the tool shape (stem like 'drill') for the generated bit.
-            FreeCAD fixes a bit's shape at creation, so this is the only
-            chance to set it. When `shape` differs from the record's stored
-            shape, the .fctb is REBUILT from geometry with the chosen shape —
-            because the stored shape is often a wrong 'endmill' default from
-            an earlier import and its document must NOT be reused. When `shape`
-            is None or matches the stored shape, the record's own verbatim
-            document is preserved (lossless).
+    This is the client's private UPDATE-vs-CREATE bookkeeping (the additive
+    'smooth' key), not part of any wire section."""
+    return ((fctb_doc or {}).get("smooth") or {}).get("record_id")
 
-    Assumptions:
-    - The verbatim original in extra["freecad"]["fctb"] is the base, so
-      unknown keys (presets, attribute, ...) survive untouched — UNLESS the
-      caller is correcting the shape, which necessarily discards the old
-      shape-specific document
-    - Server-side canonical edits overlay: name always; quantity/int
-      parameters only when the canonical value differs from the original
-      (lossless rule — formatting never churns)
-    - The additive 'smooth' key records identity for the next export
+
+def record_to_instance_sections(fctb_doc, shape=None, client_item_id=None):
+    """Translate a parsed .fctb into the pieces a client sends for a
+    ToolInstanceRecord.
+
+    Returns an ``InstanceSections(data, client_item_id, asserts)``:
+
+    - ``data`` = ``{"fctb": <doc>}`` — the full original document, lossless and
+      opaque, minus the additive 'smooth' identity key (plumbing, not tool
+      data). Unknown keys (presets, attribute, …) ride along untouched.
+    - ``client_item_id`` = the .fctb ``id`` (or the caller-supplied filename
+      stem) — the envelope's re-adoption fallback.
+    - ``asserts`` = the canonical facts FreeCAD declares, as ``(path, value)``
+      tuples: ``name``, ``geometry.shape`` (chosen, or read from the file, or
+      guessed from the name — and simply omitted if none of those yield one, so
+      the field stays honestly ``unknown`` rather than a fabricated 'endmill'),
+      and each present ``geometry.*`` dimension.
+
+    ``shape`` is the explicit user choice on import (the type picker); when set
+    it overrides the file's own shape-type, which is the "correct the wrongly
+    stamped type" path.
     """
-    base = (record.get("extra") or {}).get("freecad", {}).get("fctb")
-    geometry = record.get("geometry") or {}
-    current = record_shape(record)
-    # A chosen shape that differs from the stored one is an explicit correction:
-    # discard the (often wrongly-endmill) base and synthesize the chosen type.
-    rebuild = shape is not None and shape != current
+    doc = copy.deepcopy(fctb_doc)
+    doc.pop("smooth", None)
+
+    name = doc.get("name") or doc.get("id") or "unnamed tool"
+    chosen_shape = shape or fctb_shape(doc) or guess_shape_from_name(name)
+
+    asserts = [("name", name)]
+    if chosen_shape:
+        asserts.append(("geometry.shape", chosen_shape))
+    asserts.extend(_geometry_asserts(doc.get("parameter") or {}))
+
+    item_id = client_item_id or fctb_doc.get("id")
+    return InstanceSections(data={"fctb": doc},
+                            client_item_id=item_id,
+                            asserts=asserts)
+
+
+def instance_to_fctb(record):
+    """Regenerate a .fctb document from a sectioned ToolInstanceRecord.
+
+    Strategy (lossless first, canonical wins on conflict):
+
+    - Prefer the verbatim ``clients.freecad.data.fctb`` as the base, so unknown
+      keys survive untouched.
+    - The canonical ``geometry.shape`` is authoritative for the *type*. When it
+      differs from the base document's shape-type the bit is REBUILT from
+      ``SHAPE_DEFS`` (a base whose type was a wrong 'endmill' must not be
+      reused — FreeCAD fixes a bit's shape at creation, so the corrected type
+      is the one moment to get the shape FILE and TYPE right). When the
+      canonical shape matches (or there is none), the base is preserved.
+    - Server-canonical edits overlay: ``name`` always; each ``geometry.*``
+      parameter only when the canonical value actually differs from the
+      original string (lossless rule — formatting never churns).
+    - The additive ``smooth`` key records ``internal.id`` for the next export.
+    """
+    internal = record.get("internal") or {}
+    canonical = record.get("canonical") or {}
+    section = (record.get("clients") or {}).get(CLIENT_NAME) or {}
+    base = (section.get("data") or {}).get("fctb")
+    geometry = canonical.get("geometry") or {}
+
+    canon_shape = _field_value(geometry.get("shape"))
+    canon_shape = str(canon_shape).lower() if canon_shape else None
+    base_shape = fctb_shape(base) if base else None
+
+    # A canonical shape that disagrees with the base is a correction: discard
+    # the (often wrongly-endmill) base document and synthesize the right type.
+    rebuild = canon_shape is not None and canon_shape != base_shape
 
     if base and not rebuild:
         doc = copy.deepcopy(base)
     else:
-        chosen = shape or current or DEFAULT_SHAPE
+        chosen = canon_shape or base_shape or DEFAULT_SHAPE
         shape_file, shape_type = SHAPE_DEFS.get(
             chosen, (chosen + ".fcstd", chosen.capitalize()))
         doc = {
             "version": 2,
-            "name": record.get("name", ""),
+            "name": "",
             "shape": shape_file,
             "shape-type": shape_type,
             "attribute": {},
             # FreeCAD fills the shape's schema/defaults from the shape file;
-            # the record's geometry (Diameter, ...) overlays below.
+            # the canonical geometry (Diameter, …) overlays below.
             "parameter": {},
         }
 
-    doc["name"] = record.get("name", doc.get("name", ""))
+    name = _field_value(canonical.get("name"))
+    if name is not None:
+        doc["name"] = name
+    doc.setdefault("name", "")
+
     params = doc.setdefault("parameter", {})
-
     for param, key in QUANTITY_PARAMS.items():
-        if key not in geometry:
+        value = _field_value(geometry.get(key))
+        if value is None:
             continue
-        canonical = geometry[key]
-        unit = geometry.get(key + "_unit", "mm")
+        unit = (geometry.get(key) or {}).get("unit") if isinstance(
+            geometry.get(key), dict) else None
         original_value, original_unit = parse_quantity(params.get(param, ""))
-        if original_value is not None and abs(original_value - canonical) < 1e-9:
+        if original_value is not None and abs(original_value - value) < 1e-9:
             continue  # unchanged: keep the original string verbatim
-        params[param] = format_quantity(canonical, original_unit or unit)
+        params[param] = format_quantity(value, original_unit or unit or "mm")
     for param, key in INT_PARAMS.items():
-        if key in geometry and params.get(param) != geometry[key]:
-            params[param] = int(geometry[key])
+        value = _field_value(geometry.get(key))
+        if value is not None and params.get(param) != value:
+            params[param] = int(value)
 
-    doc["smooth"] = {
-        "record_id": record["id"],
-        "version": record.get("version"),
-    }
+    doc["smooth"] = {"record_id": internal.get("id"),
+                     "version": internal.get("version")}
     return doc
 
 
@@ -265,82 +319,108 @@ def record_to_fctb(record, shape=None):
 # .fctl <-> ToolSet
 # ---------------------------------------------------------------------------
 
-def fctl_to_tool_set(fctl, record_id_by_path):
-    """Map a parsed .fctl document (a FreeCAD tool library) to a ToolSet
-    payload.
+# The pieces a client sends to materialize a ToolSet:
+#   data           -> the clients.freecad.data payload (label + format version)
+#   client_item_id -> the envelope's re-adoption handle
+#   members        -> [{tool_record_id, number}] for the /members endpoint
+#   asserts        -> canonical facts to declare, as (path, value) tuples
+#   unresolved     -> .fctb paths with no known record id (reported, not dropped)
+SetSections = namedtuple(
+    "SetSections", ["data", "client_item_id", "members", "asserts",
+                    "unresolved"])
+
+
+def fctl_record_id(fctl_doc):
+    """The server ToolSet id a prior export wrote into the .fctl, or None."""
+    return ((fctl_doc or {}).get("smooth") or {}).get("record_id")
+
+
+def fctl_to_set_sections(fctl_doc, record_id_by_path, client_item_id=None):
+    """Translate a parsed .fctl (a FreeCAD tool library) into the pieces a
+    client sends for a ToolSet.
 
     Args:
-        fctl: parsed .fctl ({"label", "tools": [{"nr", "path"}], "version"})
-        record_id_by_path: .fctb path -> server record id (from the bit
-            export that must precede library export)
+        fctl_doc: parsed ``{"label", "tools": [{"nr", "path"}], "version"}``.
+        record_id_by_path: ``.fctb`` path -> server record id (from the bit
+            export that must precede library export).
+        client_item_id: re-adoption handle; defaults to the library label.
 
-    Returns (payload, unresolved_paths, tool_set_id): tool_set_id is the
-    server id from a prior export (additive 'smooth' key; the legacy
-    'library_id' spelling from pre-rename installs is honored on read).
-    Unresolved paths are reported, never silently dropped.
+    Returns ``SetSections(data, client_item_id, members, asserts, unresolved)``:
+
+    - ``data`` = ``{"fctl_label", "version"}`` — the FreeCAD-specific bits that
+      aren't canonical, opaque in the client section.
+    - ``members`` = ordered ``[{"tool_record_id", "number"}]`` — the per-tool
+      numbers, promoted OUT of the client section into canonical membership
+      (a set's numbering is shared truth, §7.4). Sent to the ``/members`` door.
+    - ``asserts`` = ``[("name", <label>)]`` (FreeCAD claims the set's name).
+    - ``unresolved`` = paths whose ``.fctb`` was never exported — reported, not
+      silently dropped.
     """
-    doc = copy.deepcopy(fctl)
-    smooth_meta = doc.pop("smooth", None) or {}
-    tools = doc.get("tools", []) or []
-    record_ids = []
-    numbers = {}
+    doc = copy.deepcopy(fctl_doc)
+    doc.pop("smooth", None)
+    label = doc.get("label") or "library"
+
+    members = []
     unresolved = []
-    for tool in tools:
+    for tool in (doc.get("tools") or []):
         path = tool.get("path")
         record_id = record_id_by_path.get(path)
         if record_id is None:
             unresolved.append(path)
             continue
-        record_ids.append(record_id)
-        numbers[record_id] = tool.get("nr")
+        members.append({"tool_record_id": record_id, "number": tool.get("nr")})
 
-    payload = {
-        "name": doc.get("label") or "library",
-        "tool_record_ids": record_ids,
-        "extra": {"freecad": {
-            "label": doc.get("label"),
-            "version": doc.get("version", 1),
-            "numbers": numbers,
-            "fctl": doc,
-        }},
-    }
-    return payload, unresolved, (smooth_meta.get("tool_set_id")
-                                 or smooth_meta.get("library_id"))
+    data = {"fctl_label": label, "version": doc.get("version", 1)}
+    asserts = [("name", label)]
+    item_id = client_item_id or label
+    return SetSections(data=data, client_item_id=item_id, members=members,
+                       asserts=asserts, unresolved=unresolved)
 
 
-def tool_set_to_fctl(tool_set, path_by_record_id):
-    """Regenerate a .fctl document (FreeCAD tool library) from a ToolSet.
+def set_to_fctl(toolset_record, path_by_record_id):
+    """Regenerate a .fctl document (FreeCAD tool library) from a sectioned
+    ToolSet.
 
-    Assumptions:
-    - Membership order comes from tool_record_ids (the canonical list)
-    - Tool numbers come from extra["freecad"]["numbers"]; members added
-      server-side without a number get the next free nr
-    - Members with no known .fctb path are returned in `unresolved` for
-      the caller to export first
+    - Membership order and numbers come from canonical ``members`` (the shared
+      truth); a member with no canonical number gets the next free ``nr``.
+    - The label comes from canonical ``name``, falling back to the FreeCAD
+      label stashed in ``clients.freecad.data``.
+    - Members whose record has no known ``.fctb`` path are returned in
+      ``unresolved`` for the caller to export first — never silently dropped.
+    - The additive ``smooth`` key records ``internal.id`` for the next export.
     """
-    freecad_meta = (tool_set.get("extra") or {}).get("freecad", {})
-    base = freecad_meta.get("fctl") or {}
-    numbers = dict(freecad_meta.get("numbers") or {})
-    used = {n for n in numbers.values() if isinstance(n, int)}
+    internal = toolset_record.get("internal") or {}
+    canonical = toolset_record.get("canonical") or {}
+    section = (toolset_record.get("clients") or {}).get(CLIENT_NAME) or {}
+    data = section.get("data") or {}
+
+    label = (_field_value(canonical.get("name"))
+             or data.get("fctl_label") or "library")
+    members = canonical.get("members") or []
+
+    used = {n for n in (_field_value(m.get("number")) for m in members)
+            if isinstance(n, int)}
     next_nr = max(used) + 1 if used else 1
 
     tools = []
     unresolved = []
-    for record_id in tool_set.get("tool_record_ids", []):
+    for member in members:
+        record_id = member.get("tool_record_id")
         path = path_by_record_id.get(record_id)
         if path is None:
             unresolved.append(record_id)
             continue
-        nr = numbers.get(record_id)
+        nr = _field_value(member.get("number"))
         if not isinstance(nr, int):
             nr = next_nr
             next_nr += 1
         tools.append({"nr": nr, "path": path})
 
-    doc = copy.deepcopy(base)
-    doc["label"] = tool_set.get("name", freecad_meta.get("label") or "library")
-    doc["tools"] = tools
-    doc.setdefault("version", freecad_meta.get("version", 1))
-    doc["smooth"] = {"tool_set_id": tool_set["id"],
-                     "version": tool_set.get("version")}
+    doc = {
+        "label": label,
+        "tools": tools,
+        "version": data.get("version", 1),
+    }
+    doc["smooth"] = {"record_id": internal.get("id"),
+                     "version": internal.get("version")}
     return doc, unresolved

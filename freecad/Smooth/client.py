@@ -3,12 +3,22 @@
 # SPDX-License-Identifier: MIT
 
 """
-Smooth facade API client — stdlib only, no FreeCAD imports.
+Smooth API client — stdlib only, no FreeCAD imports.
 
-Speaks ONLY the published v2 facade (ToolRecord, ToolSet); deep-entity
-routes are off-limits by design (smooth-core decision G3). All traffic
-goes through one seam, http_json(), so tests stub exactly one function —
-the same pattern as the LinuxCNC client.
+Speaks the **sectioned** tool schema (docs/TOOL_SCHEMA.md). The client touches
+exactly two entities and stays strictly in its lane:
+
+- ``ToolInstanceRecord`` (one per .fctb): create it, write its own
+  ``clients.freecad`` section on routine sync, and — deliberately — *assert*
+  the canonical facts FreeCAD's scope permits (``geometry.shape``, dimensions,
+  name). A sync section write physically cannot carry ``internal``/``canonical``
+  (the server 400s it), which is exactly why a FreeCAD import can never
+  silently fabricate ``geometry.shape``.
+- ``ToolSet`` (one per .fctl): create it, write its section, assert its
+  ``name``, and set its canonical ``members`` (the promoted-out tool numbers).
+
+All traffic goes through one seam, :func:`http_json`, so tests stub exactly one
+function — the same pattern as the LinuxCNC client.
 """
 import json
 import socket
@@ -16,6 +26,11 @@ import urllib.error
 import urllib.request
 
 HTTP_TIMEOUT = 15  # seconds
+
+# This client's identity (the `clients` map key) and software version, asserted
+# in the envelope of every section write.
+CLIENT_NAME = "freecad"
+CLIENT_VERSION = "0.2.0"
 
 
 class SmoothError(Exception):
@@ -44,7 +59,10 @@ def http_json(method, url, api_key, body=None, timeout=HTTP_TIMEOUT):
 
 
 class SmoothClient:
-    """Thin facade client. Methods mirror the published endpoints."""
+    """Sectioned-schema client. Methods mirror the published endpoints."""
+
+    INSTANCES = "/tool-instance-records"
+    SETS = "/tool-set-records"
 
     def __init__(self, base_url, api_key=""):
         self.base_url = base_url.rstrip("/")
@@ -57,31 +75,90 @@ class SmoothClient:
     def ping(self):
         return http_json("GET", self.base_url + "/api/health", self.api_key)
 
-    # ToolRecords
-    def list_records(self):
-        return self._call("GET", "/tool-records?limit=1000")["items"]
+    # -- ToolInstanceRecords (one per .fctb) --------------------------------
 
-    def create_records(self, items):
-        return self._call("POST", "/tool-records", {"items": items})
+    def list_instances(self):
+        """All instance records: GET '' -> {items: [...]}."""
+        return self._call("GET", self.INSTANCES)["items"]
 
-    def update_records(self, items):
-        return self._call("PATCH", "/tool-records", {"items": items})
+    def get_instance(self, record_id):
+        return self._call("GET", "%s/%s" % (self.INSTANCES, record_id))
 
-    def get_record(self, record_id):
-        return self._call("GET", "/tool-records/%s" % record_id)
+    def create_instance(self, data=None, client_item_id=None):
+        """Create a record, optionally seeding this client's section in the
+        same call. The create body carries ``client`` (the section key); the
+        per-section PUT below carries it in the path instead."""
+        body = None
+        if data is not None or client_item_id is not None:
+            body = {"client": CLIENT_NAME,
+                    "client_version": CLIENT_VERSION,
+                    "client_item_id": client_item_id,
+                    "data": data or {}}
+        return self._call("POST", self.INSTANCES, body)
 
-    def delete_records(self, ids):
-        return self._call("DELETE", "/tool-records", {"ids": ids})
+    def put_instance_section(self, record_id, data, client_item_id=None):
+        """Routine sync: write only this client's section. Cannot touch
+        canonical — the server rejects a body that tries."""
+        body = {"client_version": CLIENT_VERSION,
+                "client_item_id": client_item_id,
+                "data": data or {}}
+        return self._call(
+            "PUT", "%s/%s/clients/%s" % (self.INSTANCES, record_id, CLIENT_NAME),
+            body)
 
-    # ToolSets (each backs one local FreeCAD tool library / .fctl)
-    def list_tool_sets(self):
-        return self._call("GET", "/tool-sets")["items"]
+    def assert_instance(self, record_id, path, value, actor=CLIENT_NAME):
+        """The assert door: declare one canonical fact (e.g. 'geometry.shape',
+        'geometry.diameter', 'name'). Deliberate and audited."""
+        return self._call(
+            "POST", "%s/%s/assert" % (self.INSTANCES, record_id),
+            {"path": path, "value": value, "actor": actor})
 
-    def create_tool_sets(self, items):
-        return self._call("POST", "/tool-sets", {"items": items})
+    def assert_instance_fields(self, record_id, asserts, actor=CLIENT_NAME):
+        """Apply a list of ``(path, value)`` asserts (e.g. from
+        ``record_to_instance_sections``); returns the records in order."""
+        return [self.assert_instance(record_id, path, value, actor)
+                for path, value in asserts]
 
-    def update_tool_sets(self, items):
-        return self._call("PATCH", "/tool-sets", {"items": items})
+    # -- ToolSets (one per .fctl) -------------------------------------------
 
-    def delete_tool_sets(self, ids):
-        return self._call("DELETE", "/tool-sets", {"ids": ids})
+    def list_sets(self):
+        return self._call("GET", self.SETS)["items"]
+
+    def get_set(self, record_id):
+        return self._call("GET", "%s/%s" % (self.SETS, record_id))
+
+    def create_set(self, data=None, client_item_id=None):
+        body = None
+        if data is not None or client_item_id is not None:
+            body = {"client": CLIENT_NAME,
+                    "client_version": CLIENT_VERSION,
+                    "client_item_id": client_item_id,
+                    "data": data or {}}
+        return self._call("POST", self.SETS, body)
+
+    def put_set_section(self, record_id, data, client_item_id=None):
+        body = {"client_version": CLIENT_VERSION,
+                "client_item_id": client_item_id,
+                "data": data or {}}
+        return self._call(
+            "PUT", "%s/%s/clients/%s" % (self.SETS, record_id, CLIENT_NAME),
+            body)
+
+    def assert_set(self, record_id, path, value, actor=CLIENT_NAME):
+        """Declare a canonical set fact ('name' or 'machine_id')."""
+        return self._call(
+            "POST", "%s/%s/assert" % (self.SETS, record_id),
+            {"path": path, "value": value, "actor": actor})
+
+    def set_members(self, record_id, members, actor=CLIENT_NAME):
+        """Set the canonical membership (the promoted-out tool numbers).
+        ``members`` is ``[{tool_record_id, number?}]``."""
+        return self._call(
+            "POST", "%s/%s/members" % (self.SETS, record_id),
+            {"actor": actor, "members": members})
+
+    def reconcile_set(self, record_id):
+        """Ask the server to reconcile member numbers against the bound
+        machine's slots (surfacing, not silently renumbering, the cases it
+        cannot infer)."""
+        return self._call("POST", "%s/%s/reconcile" % (self.SETS, record_id))
