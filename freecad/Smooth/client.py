@@ -5,23 +5,26 @@
 """
 Smooth API client — stdlib only, no FreeCAD imports.
 
-Speaks the **sectioned** tool schema (docs/TOOL_SCHEMA.md). The client touches
-exactly two entities and stays strictly in its lane:
+Speaks the **sectioned** tool schema (docs/TOOL_SCHEMA.md). Two roles:
 
-- ``ToolInstanceRecord`` (one per .fctb): create it, write its own
-  ``clients.freecad`` section on routine sync, and — deliberately — *assert*
-  the canonical facts FreeCAD's scope permits (``geometry.shape``, dimensions,
-  name). A sync section write physically cannot carry ``internal``/``canonical``
-  (the server 400s it), which is exactly why a FreeCAD import can never
-  silently fabricate ``geometry.shape``.
-- ``ToolSet`` (one per .fctl): create it, write its section, assert its
-  ``name``, and set its canonical ``members`` (the promoted-out tool numbers).
+- The **sync lane**: ``ToolInstanceRecord`` (one per .fctb) and ``ToolSet``
+  (one per .fctl) — create them, write their own ``clients.freecad`` section on
+  routine sync, and *assert* the canonical facts FreeCAD's scope permits. A sync
+  section write physically cannot carry ``internal``/``canonical`` (the server
+  400s it), which is why a FreeCAD import can never fabricate ``geometry.shape``.
+- The **operator lane** (mirrors the web UI): browse and act on the binding
+  inbox, machines and their slots, and the audit log — confirm/reject/adopt
+  proposals, bind/unbind/move/delete slots, delete machines. These are
+  human-initiated (actor ``human@freecad``), going through the server's
+  bind/assert/human doors, not the sync lane.
 
 All traffic goes through one seam, :func:`http_json`, so tests stub exactly one
-function — the same pattern as the LinuxCNC client.
+function — the same pattern as the LinuxCNC client. Every call is timed and
+recorded in :attr:`SmoothClient.call_log` for the GUI's API-log debug panel.
 """
 import json
 import socket
+import time
 import urllib.error
 import urllib.request
 
@@ -32,9 +35,19 @@ HTTP_TIMEOUT = 15  # seconds
 CLIENT_NAME = "freecad"
 CLIENT_VERSION = "0.2.0"
 
+# Actor stamped on human-initiated operator-lane acts (asserts, binds, adopts).
+HUMAN_ACTOR = "human@freecad"
+
 
 class SmoothError(Exception):
-    """Server or network failure talking to Smooth."""
+    """Server or network failure talking to Smooth.
+
+    ``status`` is the HTTP status code when the server answered (so callers can
+    distinguish a 409 install conflict from an unreachable host), else None."""
+
+    def __init__(self, message, status=None):
+        super().__init__(message)
+        self.status = status
 
 
 def http_json(method, url, api_key, body=None, timeout=HTTP_TIMEOUT):
@@ -53,7 +66,8 @@ def http_json(method, url, api_key, body=None, timeout=HTTP_TIMEOUT):
             detail = e.read().decode("utf-8")[:300]
         except Exception:
             pass
-        raise SmoothError("HTTP %d from %s: %s" % (e.code, url, detail))
+        raise SmoothError("HTTP %d from %s: %s" % (e.code, url, detail),
+                          status=e.code)
     except (urllib.error.URLError, socket.timeout, OSError) as e:
         raise SmoothError("cannot reach %s: %s" % (url, e))
 
@@ -63,17 +77,46 @@ class SmoothClient:
 
     INSTANCES = "/tool-instance-records"
     SETS = "/tool-set-records"
+    ENTRIES = "/tool-table-entry-records"
+    MACHINES = "/machine-records"
+    INBOX = "/instance-inbox"
+    AUDIT = "/audit-logs"
+
+    CALL_LOG_LIMIT = 200
 
     def __init__(self, base_url, api_key=""):
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
+        # Ring buffer of recent requests for the GUI's API-log panel; each entry
+        # is {method, path, status, ms, error}. Newest appended last.
+        self.call_log = []
+
+    # -- request seam + call log ---------------------------------------------
+
+    def _record(self, method, path, status, ms, error=None):
+        self.call_log.append({"method": method, "path": path, "status": status,
+                              "ms": ms, "error": error})
+        if len(self.call_log) > self.CALL_LOG_LIMIT:
+            del self.call_log[:-self.CALL_LOG_LIMIT]
+
+    def _request(self, method, url, path, body=None):
+        """Time and log one request. A successful http_json implies HTTP 200
+        (it only returns on 2xx); a failure records the SmoothError's status."""
+        start = time.monotonic()
+        try:
+            result = http_json(method, url, self.api_key, body)
+        except SmoothError as e:
+            ms = int((time.monotonic() - start) * 1000)
+            self._record(method, path, getattr(e, "status", None), ms, str(e))
+            raise
+        self._record(method, path, 200, int((time.monotonic() - start) * 1000))
+        return result
 
     def _call(self, method, path, body=None):
-        return http_json(method, self.base_url + "/api/v1" + path,
-                         self.api_key, body)
+        return self._request(method, self.base_url + "/api/v1" + path, path, body)
 
     def ping(self):
-        return http_json("GET", self.base_url + "/api/health", self.api_key)
+        return self._request("GET", self.base_url + "/api/health", "/api/health")
 
     # -- ToolInstanceRecords (one per .fctb) --------------------------------
 
@@ -166,10 +209,86 @@ class SmoothClient:
     def reconcile_set(self, record_id):
         """Ask the server to reconcile member numbers against the bound
         machine's slots (surfacing, not silently renumbering, the cases it
-        cannot infer)."""
+        cannot infer). Returns the record plus ``{"unreconciled": [...]}``."""
         return self._call("POST", "%s/%s/reconcile" % (self.SETS, record_id))
 
     def delete_set(self, record_id):
         """Delete a tool set. The member instances are NOT deleted — only the
         collection. Returns ``{"deleted": <id>}``."""
         return self._call("DELETE", "%s/%s" % (self.SETS, record_id))
+
+    # -- Binding inbox (operator lane) --------------------------------------
+
+    def list_inbox(self):
+        """Open binding proposals for unbound slots: GET -> {items: [...]}.
+        Each item: {id, confidence, reason, slot:{id, machine_id, tool_number},
+        proposed_instance:{id, name, diameter}}."""
+        return self._call("GET", self.INBOX)["items"]
+
+    def confirm_proposal(self, proposal_id):
+        """Accept a proposal — bind the proposed instance to the slot.
+        Returns {"status": "confirmed", "slot_id", "instance_id"}. A 409
+        SmoothError means the instance is installed elsewhere (unbind first)."""
+        return self._call("POST", "%s/%s/confirm" % (self.INBOX, proposal_id))
+
+    def reject_proposal(self, proposal_id):
+        """Reject a proposal; that (slot, instance) pair is never re-proposed.
+        Returns {"status": "rejected"}."""
+        return self._call("POST", "%s/%s/reject" % (self.INBOX, proposal_id))
+
+    # -- Tool table entries / machine slots (operator lane) -----------------
+
+    def list_entries(self, machine_id=None):
+        """All slots, optionally filtered to one machine: -> {items: [...]}."""
+        path = self.ENTRIES
+        if machine_id:
+            path = "%s?machine_id=%s" % (self.ENTRIES, machine_id)
+        return self._call("GET", path)["items"]
+
+    def get_entry(self, record_id):
+        return self._call("GET", "%s/%s" % (self.ENTRIES, record_id))
+
+    def bind_entry(self, record_id, instance_id, move=False, actor=HUMAN_ACTOR):
+        """Bind an instance into this slot. ``move=True`` atomically relocates
+        an instance installed elsewhere; with the default ``move=False`` the
+        server returns a 409 naming where it is already installed."""
+        return self._call(
+            "POST", "%s/%s/bind" % (self.ENTRIES, record_id),
+            {"instance_id": instance_id, "actor": actor, "move": move})
+
+    def unbind_entry(self, record_id):
+        """Clear a slot's binding; the instance survives, only the install link
+        dies. Returns the updated slot."""
+        return self._call("POST", "%s/%s/unbind" % (self.ENTRIES, record_id))
+
+    def adopt_entry(self, record_id, name=None, actor=HUMAN_ACTOR):
+        """Mint a new instance from an unbound slot's observations and install
+        it. Returns {"instance_id", "slot": {...}}."""
+        body = {"actor": actor}
+        if name is not None:
+            body["name"] = name
+        return self._call("POST", "%s/%s/adopt" % (self.ENTRIES, record_id), body)
+
+    def delete_entry(self, record_id):
+        """Remove a reported slot. Returns ``{"deleted": <id>}``. (If the
+        controller re-pushes, the slot returns.)"""
+        return self._call("DELETE", "%s/%s" % (self.ENTRIES, record_id))
+
+    # -- Machines (operator lane) -------------------------------------------
+
+    def list_machines(self):
+        return self._call("GET", self.MACHINES)["items"]
+
+    def get_machine(self, record_id):
+        return self._call("GET", "%s/%s" % (self.MACHINES, record_id))
+
+    def delete_machine(self, record_id):
+        """Delete a machine and its tool-table slots (instances survive).
+        Returns ``{"deleted": <id>, "slots_removed": <n>}``."""
+        return self._call("DELETE", "%s/%s" % (self.MACHINES, record_id))
+
+    # -- Audit log (operator lane, read-only) -------------------------------
+
+    def list_audit(self, limit=50):
+        """Recent audit entries (immutable operation log): -> {logs: [...]}."""
+        return self._call("GET", "%s?limit=%d" % (self.AUDIT, limit))["logs"]

@@ -29,8 +29,9 @@ class SmoothSyncCommand:
         
         return {
             'Pixmap': icon_path if os.path.exists(icon_path) else '',
-            'MenuText': 'Sync with Smooth',
-            'ToolTip': 'Synchronize FreeCAD tool libraries with Smooth server',
+            'MenuText': 'Smooth',
+            'ToolTip': 'Open the Smooth window: sync tools, process the binding '
+                       'inbox, and browse tools / sets / machines',
         }
     
     def Activated(self):
@@ -40,7 +41,7 @@ class SmoothSyncCommand:
                 from freecad.Smooth import SmoothDialog
             except ImportError:
                 import SmoothDialog  # flat layout on sys.path
-            dialog = SmoothDialog.SmoothSyncDialog()
+            dialog = SmoothDialog.SmoothWindow()
             dialog.exec_()
         except Exception as e:
             App.Console.PrintError(f"Failed to open Smooth sync dialog: {e}\n")
