@@ -2,29 +2,29 @@
 
 ![FreeCAD Version](https://img.shields.io/badge/FreeCAD-0.21+-blue.svg) ![License](https://img.shields.io/badge/License-MIT-green.svg) ![CAM Workbench](https://img.shields.io/badge/CAM-Workbench-orange.svg)
 
-**Keep your tool libraries synchronized across FreeCAD, CNC controllers, and tool management systems**
+Keep tool libraries synchronized across FreeCAD, CNC controllers, and tool
+management systems.
 
 ---
 
-## The Problem
+## The problem
 
-You maintain tool data in multiple places:
-- **FreeCAD** for CAM programming
-- **CNC Controller** for actual machining (LinuxCNC, etc.)
-- **Spreadsheets** for inventory tracking
-- **Shop Floor** paper lists
-- **Camotics** simulation
+Tool data usually lives in several places at once:
 
-When a tool changes (new tool, new insert, wear offset, replacement), you update each system **manually**. 
+- FreeCAD, for CAM programming
+- the CNC controller (LinuxCNC and others), for machining
+- spreadsheets, for inventory
+- shop-floor paper lists
+- simulators such as Camotics
 
-❌ Errors happen  
-❌ Parts get scrapped  
-❌ Time is wasted  
-❌ Tool data diverges
+When a tool changes — a new tool, a new insert, a wear offset, a replacement —
+each of those has to be updated by hand. The copies drift apart, and the
+mismatches cause scrapped parts and wasted time.
 
-## The Solution
+## What Smooth does
 
-**Smooth** is a tool synchronization system that keeps your tool libraries in sync - automatically.
+Smooth is a tool synchronization system that keeps these libraries in sync. This
+addon connects FreeCAD's CAM workbench to a Smooth server.
 
 ```
 ┌─────────────┐         ┌──────────────┐         ┌─────────────┐
@@ -39,18 +39,18 @@ When a tool changes (new tool, new insert, wear offset, replacement), you update
                         └────────────┘
 ```
 
-This addon connects FreeCAD's CAM workbench to Smooth, giving you **one-click sync** in both directions.
+It syncs in both directions: FreeCAD to the server, and the server to FreeCAD.
 
 ---
 
-## What Does This Addon Do?
+## What does this addon do?
 
-### **Export Tools to Smooth**
-- One-click upload of your FreeCAD tool bits
+### Export tools to Smooth
+- Upload your FreeCAD tool bits to the server
 - Share tools across multiple machines and workstations
-- Server-side backup of your tool data
+- Keep a server-side backup of your tool data
 
-### **Import Tools from Smooth**
+### Import tools from Smooth
 - Download tool data from the server into FreeCAD
 - Keep multiple FreeCAD installations in sync
 
@@ -92,17 +92,16 @@ Get the server url and an API key from the server.
 **Step 2: Configure FreeCAD**
 
 1. Go to **Edit → Preferences → CAM → Smooth**
-2. Enter server URL
+2. Enter the server URL
 3. Enter the API key
-4. Click **Test Connection** ✓
+4. Click **Test Connection**
 5. Click **Apply** to save
 
-**Step 3: Start Syncing!**
+**Step 3: Sync**
 
-1. Switch to **CAM Workbench**
-2. Click the **"Sync with Smooth"** button in toolbar  
+1. Switch to the **CAM Workbench**
+2. Click the **Sync with Smooth** button in the toolbar
 3. Choose **Export** or **Import**
-4. Done! ✅
 
 ---
 
@@ -116,7 +115,7 @@ Get the server url and an API key from the server.
 4. Converts them to Smooth's universal format
 5. Uploads to the server (shape files are referenced by path, not uploaded — see limitations above)
 
-**Result:** Your tools are now in the central database, accessible from anywhere!
+Your tools are now in the central database.
 
 ### Importing Tools (Smooth → FreeCAD)
 
@@ -127,7 +126,7 @@ Get the server url and an API key from the server.
 5. Writes `.fctb` and `.fctl` files
 6. Reloads FreeCAD library
 
-**Result:** Your FreeCAD installation has the latest tools from the central database!
+Your FreeCAD installation now has the latest tools from the central database.
 
 ### Handling Conflicts
 
@@ -176,12 +175,7 @@ MIT License - see [LICENSE](./LICENSE) file
 - **GitHub Organization:** https://github.com/loobric
 - **Documentation:** https://loobric.com/docs
 
-**Special Thanks:**
-- FreeCAD community for the amazing CAM workbench
-- ISO 13399 standard for tool data modeling inspiration
+**Acknowledgements:**
+- The FreeCAD community, for the CAM workbench
+- The ISO 13399 standard, for tool data modeling
 - All contributors and testers
-
-
-**⭐ If you find Smooth useful, please star the project on GitHub! ⭐**
-
-Made with ❤️ for the FreeCAD community

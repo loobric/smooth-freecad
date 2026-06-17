@@ -7,7 +7,8 @@ Tab widgets and debug panels for the tabbed Smooth window (SmoothDialog.py).
 
 Mirrors the smooth-core web UI: a **Sync** tab (plan/apply of the local tool
 dir, with bulk node-level actions), and operator-lane tabs — **Inbox**,
-**Tools**, **Tool Sets**, **Machines** (with their tool tables), **Audit** —
+**Tools**, **Tool Sets**, **Coverage** (a set's tools vs. its linked machine's
+tool table), **Machines** (with their tool tables), **Audit** —
 plus two shared debug widgets: a raw sectioned-record **RecordInspector** and a
 live **ApiLogPanel** fed by ``SmoothClient.call_log``.
 
@@ -26,7 +27,28 @@ from .client import SmoothError
 from .uihelpers import (field_value, field_source, canonical as _canonical,
                         short_id, record_name, instance_shape,
                         instance_diameter, fmt_dia as _fmt_dia,
-                        cascade_choice, SKIP, LOCAL_WINS, SERVER_WINS)
+                        cascade_choice, SKIP, LOCAL_WINS, SERVER_WINS,
+                        coverage_is_applicable,
+                        content_attention_rows, coverage_attention_rows,
+                        needs_attention_rows, library_rollup,
+                        library_rollup_line, resolution_rows,
+                        resolution_actions, RESOLUTION_DECISION,
+                        SEV_CRITICAL, SEV_WARNING, SEV_INFO)
+
+
+# Severity -> (background, foreground, bold). Shared by the Needs-Attention and
+# Coverage views so the same band looks the same everywhere. Each entry is
+# (background, foreground, bold). We set BOTH colors deliberately: a light
+# background alone leaves the row's text at the theme default, which is light on
+# FreeCAD's dark themes — i.e. white-on-white. Pairing each light tint with a
+# dark foreground keeps the row legible on light AND dark themes.
+_FG_ON_TINT = QtGui.QColor(33, 33, 33)
+TINT_WARNING = QtGui.QColor(255, 235, 190)
+SEV_STYLE = {
+    SEV_CRITICAL: (QtGui.QColor(255, 205, 205), _FG_ON_TINT, True),
+    SEV_WARNING: (TINT_WARNING, _FG_ON_TINT, False),
+    SEV_INFO: (QtGui.QColor(238, 238, 238), _FG_ON_TINT, False),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -166,11 +188,16 @@ class _Tab(QtGui.QWidget):
 # ---------------------------------------------------------------------------
 
 class SyncTab(_Tab):
-    """The plan/apply tree. Set a direction on a folder node to cascade it to
-    every tool inside; each row is still individually overridable. Nothing
-    touches disk or server until Apply."""
+    """The Libraries view: hierarchical browsing of every library and its tools,
+    each library labelled with a DERIVED rollup of its contents (✓ synced ·
+    ↑ local-only · ↓ server-only · ⚠ conflicts). Set a direction on a folder node
+    to cascade it to every tool inside; each row is still individually
+    overridable. Nothing touches disk or server until Apply.
 
-    TITLE = "Sync"
+    A library is organization, not a sync object — its rollup *summarizes* its
+    tools; the library is never itself 'conflicted'."""
+
+    TITLE = "Libraries"
 
     ACTION_LABELS = {
         "unchanged": "in sync", "push": "changed here",
@@ -298,13 +325,18 @@ class SyncTab(_Tab):
         pending = 0
         shown = set()
         for library in sorted(libraries, key=lambda i: i["name"]):
-            node = QtGui.QTreeWidgetItem(["📁 %s" % library["name"], "", "", ""])
+            members = sorted(bits_by_group.get(library["group"], []),
+                             key=lambda i: i["name"])
+            rollup = library_rollup_line(library_rollup(members))
+            node = QtGui.QTreeWidgetItem(
+                ["📁 %s" % library["name"], rollup, "", ""])
+            node.setToolTip(1, "Derived from this library's tools — the library "
+                               "itself is never 'conflicted'.")
             self.tree.addTopLevelItem(node)
             child_keys = []
             pending += self._add_row(node, library, indent_self=True)
             child_keys.append(library["key"])
-            for bit in sorted(bits_by_group.get(library["group"], []),
-                              key=lambda i: i["name"]):
+            for bit in members:
                 pending += self._add_row(node, bit)
                 child_keys.append(bit["key"])
                 shown.add(bit["key"])
@@ -313,7 +345,11 @@ class SyncTab(_Tab):
         loose = [b for b in sorted(bits, key=lambda i: i["name"])
                  if b["key"] not in shown]
         if loose:
-            node = QtGui.QTreeWidgetItem(["📄 Not in any library", "", "", ""])
+            # Unassigned toolbits (in no library) stay visible with their own
+            # rollup, never hidden.
+            rollup = library_rollup_line(library_rollup(loose))
+            node = QtGui.QTreeWidgetItem(
+                ["📄 Not in any library", rollup, "", ""])
             self.tree.addTopLevelItem(node)
             child_keys = []
             for bit in loose:
@@ -800,6 +836,333 @@ class ToolSetsTab(_ListTab):
         has = self._record() is not None
         for b in (self.rename, self.reconcile, self.delete):
             b.setEnabled(has)
+
+
+# ---------------------------------------------------------------------------
+# Per-object resolution view (side-by-side field comparison)
+# ---------------------------------------------------------------------------
+
+class ResolutionDialog(QtGui.QDialog):
+    """One object, one resolution. Shows the per-field side-by-side comparison
+    (server side annotated with canonical provenance) and offers Keep Local /
+    Keep Server / Skip. The chosen key is read back via :meth:`get_choice`.
+
+    All comparison content comes from the pure ``resolution_rows`` helper; this
+    class only renders it — so the comparison logic stays headless-testable."""
+
+    def __init__(self, row, parent=None):
+        super().__init__(parent)
+        self.choice = None
+        name = row.get("name") or "object"
+        self.setWindowTitle("Resolve: %s" % name)
+        self.resize(620, 380)
+        layout = QtGui.QVBoxLayout(self)
+
+        header = QtGui.QLabel(
+            "<b>%s</b><br>%s" % (name, row.get("detail") or row.get("hint") or ""))
+        header.setWordWrap(True)
+        layout.addWidget(header)
+
+        rows = resolution_rows(row)
+        table = QtGui.QTreeWidget()
+        table.setHeaderLabels(["Field", "Local", "Server", "Server source"])
+        table.setRootIsDecorated(False)
+        table.setColumnWidth(0, 160)
+        table.setColumnWidth(1, 150)
+        table.setColumnWidth(2, 150)
+        for r in rows:
+            item = QtGui.QTreeWidgetItem([
+                str(r["field"]),
+                repr(r["local"]),
+                repr(r["server"]),
+                r["server_source"] or "—",
+            ])
+            # Tint the side that moved away from sync.
+            changed = r.get("changed_by")
+            if changed in ("local", "both"):
+                item.setBackground(1, TINT_WARNING)
+                item.setForeground(1, _FG_ON_TINT)
+            if changed in ("server", "both"):
+                item.setBackground(2, TINT_WARNING)
+                item.setForeground(2, _FG_ON_TINT)
+            table.addTopLevelItem(item)
+        if not rows:
+            note = ("No field-level differences are recorded for this item "
+                    "(it may be a whole-object create/delete). Choose which "
+                    "side to keep.")
+            layout.addWidget(QtGui.QLabel(note))
+        layout.addWidget(table, stretch=1)
+
+        buttons = QtGui.QHBoxLayout()
+        buttons.addStretch()
+        for key, label in resolution_actions(row):
+            btn = QtGui.QPushButton(label)
+            btn.clicked.connect(lambda _=False, k=key: self._choose(k))
+            buttons.addWidget(btn)
+        layout.addLayout(buttons)
+
+    def _choose(self, key):
+        self.choice = key
+        self.accept()
+
+    def get_choice(self):
+        return self.choice if self.exec_() == QtGui.QDialog.Accepted else None
+
+
+# ---------------------------------------------------------------------------
+# Needs Attention — the exceptions-first primary view (issue #9)
+# ---------------------------------------------------------------------------
+
+class NeedsAttentionTab(_Tab):
+    """The primary, exceptions-first view. Aggregates the two exception axes —
+    CAM content (per-object Local-only / Server-only / Modified / Conflict, from
+    the sync plan) and MACHINE COVERAGE (absent_on_machine / number_mismatch /
+    collisions, from each linked set's /coverage) — into one worst-first stream.
+    Healthy, in-sync objects stay quiet; an empty list means all is well.
+
+    The standalone Coverage tab folds in here: coverage is just one exception
+    stream, not a separate tab. Selecting a CAM-content row opens the per-object
+    resolution view; coverage rows are physical/operator-lane and route the user
+    to where they're fixed (link/Machines), since there is no library write that
+    loads a tool onto a machine.
+
+    All derivation/aggregation lives in pure uihelpers (headless-tested); this
+    class only fetches, renders, and dispatches resolutions."""
+
+    TITLE = "Needs Attention"
+
+    def __init__(self, window, client, tools_dir):
+        super().__init__(window, client)
+        self.tools_dir = tools_dir
+        self._plan = {"items": [], "errors": []}
+        self._rows = []            # row dicts shown, by tree index
+        self._unlinked = []        # (set_id, set_name) of sets without a machine
+        layout = QtGui.QVBoxLayout(self)
+
+        self.summary = QtGui.QLabel("")
+        self.summary.setWordWrap(True)
+        layout.addWidget(self.summary)
+
+        self.tree = QtGui.QTreeWidget()
+        self.tree.setHeaderLabels(["Type", "Tool", "Where", "Status"])
+        self.tree.setRootIsDecorated(False)
+        self.tree.setColumnWidth(0, 80)
+        self.tree.setColumnWidth(1, 220)
+        self.tree.setColumnWidth(2, 160)
+        self.tree.itemSelectionChanged.connect(self._selection_changed)
+        self.tree.itemDoubleClicked.connect(lambda *_: self._resolve())
+        layout.addWidget(self.tree, stretch=1)
+
+        buttons = QtGui.QHBoxLayout()
+        refresh = QtGui.QPushButton("Refresh")
+        refresh.clicked.connect(self.refresh)
+        buttons.addWidget(refresh)
+        self.resolve_button = QtGui.QPushButton("Resolve…")
+        self.resolve_button.setToolTip(
+            "Open the side-by-side resolution for the selected CAM object.")
+        self.resolve_button.clicked.connect(self._resolve)
+        self.resolve_button.setEnabled(False)
+        buttons.addWidget(self.resolve_button)
+        self.link_button = QtGui.QPushButton("Link set to machine…")
+        self.link_button.setToolTip(
+            "Link a tool set to a machine so its coverage can be checked.")
+        self.link_button.clicked.connect(self._link)
+        buttons.addWidget(self.link_button)
+        buttons.addStretch()
+        layout.addLayout(buttons)
+
+    # -- data --------------------------------------------------------------
+
+    def refresh(self):
+        self.tree.clear()
+        self._rows = []
+        self._unlinked = []
+        try:
+            self._plan = sync.plan_sync(self.tools_dir, self.client)
+        except SmoothError as e:
+            self.window.refresh_api_log()
+            self.summary.setText("✗ %s" % e)
+            return
+        items = self._plan["items"]
+
+        # CAM-content axis (library): one row per object, synced ones dropped.
+        content = content_attention_rows(items)
+
+        # Names for coverage rows, harvested from the plan's bit records (no
+        # extra request). Sets likewise come from the plan's library items.
+        names = {}
+        sets = []
+        for it in items:
+            rec = it.get("record")
+            if not rec:
+                continue
+            rid = (rec.get("internal") or {}).get("id")
+            if it["kind"] == "bit" and rid:
+                names[rid] = it["name"]
+            elif it["kind"] == "library" and rid:
+                sets.append((rid, it["name"]))
+
+        # Machine-coverage axis (control): per linked set, the actionable rows.
+        coverage = []
+        for sid, sname in sets:
+            try:
+                cov = self.client.get_set_coverage(sid)
+            except SmoothError as e:
+                self.summary.setText("✗ coverage for %s: %s" % (sname, e))
+                continue
+            if coverage_is_applicable(cov):
+                coverage.extend(coverage_attention_rows(
+                    cov, set_name=sname, set_id=sid, names=names))
+            else:
+                self._unlinked.append((sid, sname))
+        self.window.refresh_api_log()
+
+        self._rows = needs_attention_rows(content, coverage)
+        for row in self._rows:
+            self._add_row(row)
+
+        if self._rows:
+            self.summary.setText(
+                "%d item(s) need attention — worst first. Double-click a CAM "
+                "object to resolve it." % len(self._rows))
+        else:
+            self.summary.setText("✓ Nothing needs attention — everything is in "
+                                 "sync and on its machines.")
+        if self._unlinked:
+            self.summary.setText(self.summary.text() + "  (%d set(s) not linked "
+                                 "to a machine — coverage unchecked.)"
+                                 % len(self._unlinked))
+
+    def _add_row(self, row):
+        axis = row.get("axis")
+        if axis == "coverage":
+            where = "set: %s" % (row.get("set_name") or "?")
+            tnum = row.get("tnum")
+            obj = row.get("name") or "?"
+            if tnum is not None:
+                obj = "T%s  %s" % (tnum, obj)
+            status = row.get("label") or row.get("status") or ""
+            if row.get("collides") and row.get("collides_with"):
+                status = "%s (with T%s)" % (
+                    status, ", T".join(str(t) for t in row["collides_with"]))
+            axis_label = "Machine"
+        else:
+            where = row.get("group") or "(unassigned)"
+            obj = row.get("name") or "?"
+            status = row.get("label") or ""
+            axis_label = "Library"
+        item = QtGui.QTreeWidgetItem([axis_label, obj, where, status])
+        item.setToolTip(3, row.get("hint") or "")
+        # Stash this row's index into self._rows so the resolution dispatch can
+        # recover the full row dict from the selected tree item.
+        item.setData(0, QtCore.Qt.UserRole, self.tree.topLevelItemCount())
+        style = SEV_STYLE.get(row.get("severity"))
+        if style:
+            bg, fg, bold = style
+            for col in range(4):
+                item.setBackground(col, bg)
+                item.setForeground(col, fg)
+            if bold:
+                font = item.font(3)
+                font.setBold(True)
+                item.setFont(1, font)
+                item.setFont(3, font)
+        self.tree.addTopLevelItem(item)
+
+    # -- resolution / actions ----------------------------------------------
+
+    def _selected_row(self):
+        selected = self.tree.selectedItems()
+        if not selected:
+            return None
+        idx = selected[0].data(0, QtCore.Qt.UserRole)
+        if idx is None or idx >= len(self._rows):
+            return None
+        return self._rows[idx]
+
+    def _selection_changed(self):
+        row = self._selected_row()
+        self.resolve_button.setEnabled(
+            bool(row) and row.get("axis") == "content")
+
+    def _resolve(self):
+        row = self._selected_row()
+        if not row:
+            return
+        if row.get("axis") == "coverage":
+            QtGui.QMessageBox.information(
+                self, "Coverage exception",
+                "%s\n\nThis is a machine-coverage issue, resolved physically "
+                "(load/order the tool) or on the Machines tab (bind/renumber "
+                "slots) — not by a library upload/download." % (row.get("hint") or ""))
+            return
+        choice = ResolutionDialog(row, parent=self).get_choice()
+        if not choice:
+            return
+        decision = RESOLUTION_DECISION.get(choice, "skip")
+        if decision == "skip":
+            self._notify("Skipped %s." % row.get("name"))
+            return
+        decisions = {row["key"]: decision}
+        try:
+            summary = sync.apply_sync(self.tools_dir, self.client, self._plan,
+                                      decisions)
+        except SmoothError as e:
+            self.window.refresh_api_log()
+            QtGui.QMessageBox.warning(self, "Smooth", str(e))
+            self._notify("✗ %s" % e)
+            return
+        self.window.refresh_api_log()
+        if summary["errors"]:
+            QtGui.QMessageBox.warning(self, "Smooth",
+                                      "\n".join(summary["errors"]))
+        self._notify("Resolved '%s' — %d uploaded, %d downloaded."
+                     % (row.get("name"), summary["pushed"], summary["pulled"]))
+        self.refresh()
+
+    def _link(self):
+        """Link an unlinked set to a machine so its coverage becomes checkable.
+        (Carried over from the folded-in Coverage tab; an operator-lane
+        machine_id assert, not an invented endpoint.)"""
+        if not self._unlinked:
+            QtGui.QMessageBox.information(
+                self, "Link set to machine",
+                "Every tool set is already linked to a machine (or there are "
+                "no sets yet).")
+            return
+        set_labels = ["%s  [%s]" % (name, sid[:8])
+                      for sid, name in self._unlinked]
+        choice, ok = QtGui.QInputDialog.getItem(
+            self, "Link set to machine", "Which set?", set_labels, 0, False)
+        if not ok:
+            return
+        sid = self._unlinked[set_labels.index(choice)][0]
+        try:
+            machines = self.client.list_machines()
+        except SmoothError as e:
+            self.window.refresh_api_log()
+            QtGui.QMessageBox.warning(self, "Smooth", str(e))
+            return
+        self.window.refresh_api_log()
+        if not machines:
+            QtGui.QMessageBox.information(
+                self, "Link set to machine",
+                "No machines on the server yet to link to.")
+            return
+        labels = ["%s  [%s]" % (record_name(m), short_id(m)) for m in machines]
+        mchoice, ok = QtGui.QInputDialog.getItem(
+            self, "Link set to machine",
+            "Map this set onto which machine's tool table?", labels, 0, False)
+        if not ok:
+            return
+        machine = machines[labels.index(mchoice)]
+        mid = machine["internal"]["id"]
+        self.act(lambda: self.client.link_set_machine(sid, mid),
+                 success="Linked — coverage is now checked against that machine.")
+
+    def selected_record(self):
+        row = self._selected_row()
+        return row.get("record") if row else None
 
 
 # ---------------------------------------------------------------------------

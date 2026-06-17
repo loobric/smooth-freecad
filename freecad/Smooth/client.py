@@ -212,6 +212,26 @@ class SmoothClient:
         cannot infer). Returns the record plus ``{"unreconciled": [...]}``."""
         return self._call("POST", "%s/%s/reconcile" % (self.SETS, record_id))
 
+    def get_set_coverage(self, record_id):
+        """How this set maps onto its linked machine's tool table.
+
+        Returns the server's coverage report verbatim. When the set is not
+        linked to a machine: ``{"set_id", "machine_id": null,
+        "applicable": false, "reason": <str>}``. When linked:
+        ``{"set_id", "machine_id", "applicable": true, "members": [...],
+        "slots": [...], "summary": {...}}`` — each member carries a ``status``
+        of ``in_sync`` / ``number_mismatch`` / ``absent_on_machine`` (a library
+        tool not yet on the machine — the one to order/load) plus collision
+        flags; each extra machine slot carries ``machine_only`` / ``unbound_slot``.
+        See uihelpers.coverage_rows for turning this into display rows."""
+        return self._call("GET", "%s/%s/coverage" % (self.SETS, record_id))
+
+    def link_set_machine(self, record_id, machine_id, actor=HUMAN_ACTOR):
+        """Link a set to a machine so its coverage becomes computable — a
+        human-initiated ``machine_id`` assert (the operator lane). Returns the
+        updated set record."""
+        return self.assert_set(record_id, "machine_id", machine_id, actor=actor)
+
     def delete_set(self, record_id):
         """Delete a tool set. The member instances are NOT deleted — only the
         collection. Returns ``{"deleted": <id>}``."""

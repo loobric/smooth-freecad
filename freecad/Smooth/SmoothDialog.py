@@ -5,10 +5,13 @@
 """
 Smooth — the tabbed desktop window.
 
-Mirrors the smooth-core web UI as tabs (Sync · Inbox · Tools · Tool Sets ·
-Machines · Audit) over a single shared ``SmoothClient`` (so all HTTP traffic
-lands in one call log). A shared header shows the server + connection state; a
-bottom bar offers raw-record JSON inspection and a live API log.
+An exceptions-first shell: **Needs Attention** is the primary tab (aggregating
+CAM-content and machine-coverage exceptions — the old Coverage tab folds in
+here), followed by the hierarchical **Libraries** browser and the operator-lane
+tabs (Inbox · Tools · Tool Sets · Machines · Audit) over a single shared
+``SmoothClient`` (so all HTTP traffic lands in one call log). A shared header
+shows the server + connection state; a bottom bar offers raw-record JSON
+inspection and a live API log.
 
 All behavior lives in the headless-tested modules (client.py, sync.py,
 mapping.py) and in SmoothTabs.py; this file is the shell that wires them up.
@@ -66,8 +69,8 @@ def get_tools_dir() -> Path:
 
 
 class SmoothWindow(QtGui.QDialog):
-    """Tabbed Smooth window. Opens on the Sync tab; other tabs lazy-load when
-    first shown. One client is shared by every tab."""
+    """Tabbed Smooth window. Opens on the Needs Attention tab; other tabs
+    lazy-load when first shown. One client is shared by every tab."""
 
     def __init__(self):
         super().__init__()
@@ -93,8 +96,13 @@ class SmoothWindow(QtGui.QDialog):
 
         self.tabs = QtGui.QTabWidget()
         tools_dir = str(get_tools_dir())
+        # Needs Attention is the primary, exceptions-first view; the old
+        # standalone Coverage tab folds into it as one exception stream.
+        self.attention_tab = SmoothTabs.NeedsAttentionTab(self, self.client,
+                                                          tools_dir)
         self.sync_tab = SmoothTabs.SyncTab(self, self.client, tools_dir)
         self._tab_list = [
+            self.attention_tab,
             self.sync_tab,
             SmoothTabs.InboxTab(self, self.client),
             SmoothTabs.ToolsTab(self, self.client),
@@ -134,7 +142,7 @@ class SmoothWindow(QtGui.QDialog):
 
     def _on_open(self):
         self._check_connection()
-        self.sync_tab.ensure_loaded()   # the default tab
+        self.attention_tab.ensure_loaded()   # the default, primary tab
 
     def _check_connection(self):
         try:
