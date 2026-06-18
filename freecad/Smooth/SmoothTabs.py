@@ -614,9 +614,9 @@ class InboxTab(_ListTab):
                        "", ""])
             return
         for p in proposals:
-            slot = p.get("slot") or {}
+            entry = p.get("entry") or {}
             inst = p.get("proposed_instance") or {}
-            tnum = slot.get("tool_number")
+            tnum = entry.get("tool_number")
             conf = p.get("confidence")
             self._add([
                 "T%s" % tnum if tnum is not None else "?",
@@ -1348,9 +1348,10 @@ class MachinesTab(_Tab):
                      "Delete '%s' and its tool-table slots? Tools are kept."
                      % record_name(machine)),
             success="Machine deleted.")
-        if result and result.get("slots_removed") is not None:
-            self._notify("Machine deleted (%d slot(s) removed)."
-                         % result["slots_removed"])
+        if result and result.get("entries_removed") is not None:
+            self._notify("Machine deleted (%d entr%s removed)."
+                         % (result["entries_removed"],
+                            "y" if result["entries_removed"] == 1 else "ies"))
 
     def _selection_changed(self):
         kind, record = self._selected()

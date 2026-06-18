@@ -26,7 +26,7 @@ def calls(monkeypatch):
         captured.append({"method": method, "url": url, "body": body})
         return {"items": [], "logs": [], "status": "ok",
                 "internal": {"id": "rec-1"}, "instance_id": "inst-1",
-                "slot": {}, "deleted": "x", "unreconciled": []}
+                "entry": {}, "deleted": "x", "unreconciled": []}
 
     monkeypatch.setattr(client_mod, "http_json", fake_http_json)
     return captured

@@ -241,13 +241,13 @@ class SmoothClient:
 
     def list_inbox(self):
         """Open binding proposals for unbound slots: GET -> {items: [...]}.
-        Each item: {id, confidence, reason, slot:{id, machine_id, tool_number},
+        Each item: {id, confidence, reason, entry:{id, machine_id, tool_number},
         proposed_instance:{id, name, diameter}}."""
         return self._call("GET", self.INBOX)["items"]
 
     def confirm_proposal(self, proposal_id):
         """Accept a proposal — bind the proposed instance to the slot.
-        Returns {"status": "confirmed", "slot_id", "instance_id"}. A 409
+        Returns {"status": "confirmed", "entry_id", "instance_id"}. A 409
         SmoothError means the instance is installed elsewhere (unbind first)."""
         return self._call("POST", "%s/%s/confirm" % (self.INBOX, proposal_id))
 
@@ -304,7 +304,7 @@ class SmoothClient:
 
     def delete_machine(self, record_id):
         """Delete a machine and its tool-table slots (instances survive).
-        Returns ``{"deleted": <id>, "slots_removed": <n>}``."""
+        Returns ``{"deleted": <id>, "entries_removed": <n>}``."""
         return self._call("DELETE", "%s/%s" % (self.MACHINES, record_id))
 
     # -- Audit log (operator lane, read-only) -------------------------------
