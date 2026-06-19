@@ -90,9 +90,23 @@ class SmoothWindow(QtGui.QDialog):
         layout = QtGui.QVBoxLayout(self)
 
         header = QtGui.QHBoxLayout()
-        header.addWidget(QtGui.QLabel(f"Server: {self.config['api_url']}"))
+        # A single Refresh control for the whole window — it reloads whichever
+        # tab is showing (each tab fetches its own data).
+        self.refresh_button = QtGui.QToolButton()
+        try:    # standard reload icon; fall back to text if the enum isn't exposed
+            self.refresh_button.setIcon(
+                self.style().standardIcon(QtGui.QStyle.SP_BrowserReload))
+        except Exception:
+            self.refresh_button.setText("Refresh")
+        self.refresh_button.setAutoRaise(True)
+        self.refresh_button.setToolTip("Refresh the current tab from the server")
+        self.refresh_button.clicked.connect(self.refresh_current_tab)
+        header.addWidget(self.refresh_button)
         header.addStretch()
+        # Connection state only — the server URL lives in its tooltip (it isn't
+        # editable here). Plain text, no checkmark (it is not a control).
         self.conn_label = QtGui.QLabel("checking…")
+        self.conn_label.setToolTip(f"Server: {self.config['api_url']}")
         header.addWidget(self.conn_label)
         layout.addLayout(header)
 
@@ -114,13 +128,12 @@ class SmoothWindow(QtGui.QDialog):
         self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
 
-        # Raw-record inspection and the live API log are diagnostics, not primary
-        # chrome — they live behind a Debug menu.
+        # Diagnostics live behind a Debug menu, not in primary chrome. Record
+        # inspection is a right-click action on any row (every tab), not a menu
+        # item — so it works wherever a row is selected.
         bar = QtGui.QHBoxLayout()
         debug = QtGui.QPushButton("Debug ▾")
         debug_menu = QtGui.QMenu(debug)
-        act_inspect = debug_menu.addAction("Inspect selected record (JSON)…")
-        act_inspect.triggered.connect(self.inspect_selected)
         act_log = debug_menu.addAction("API log…")
         act_log.triggered.connect(self.show_api_log)
         debug.setMenu(debug_menu)
@@ -152,11 +165,19 @@ class SmoothWindow(QtGui.QDialog):
     def _check_connection(self):
         try:
             self.client.ping()
-            self.conn_label.setText("✓ connected")
+            self.conn_label.setText("connected")
         except SmoothError as e:
-            self.conn_label.setText("✗ unreachable")
+            self.conn_label.setText("not connected")
             self.status(f"Cannot reach server: {e}")
         self.refresh_api_log()
+
+    def refresh_current_tab(self):
+        """The single header Refresh: re-check the connection and reload the
+        tab currently showing."""
+        self._check_connection()
+        widget = self.tabs.currentWidget()
+        if hasattr(widget, "refresh"):
+            widget.refresh()
 
     def _tab_changed(self, index):
         widget = self.tabs.widget(index)

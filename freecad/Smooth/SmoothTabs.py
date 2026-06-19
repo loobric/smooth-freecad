@@ -290,13 +290,18 @@ class SyncTab(_Tab):
         top = QtGui.QHBoxLayout()
         hint = QtGui.QLabel(
             "Tip: use the dropdown on a 📁 tool-set row to set every tool inside "
-            "at once; right-click a row to rename, set type, delete, or link a "
-            "set to a machine.")
+            "at once; right-click a row to inspect, rename, set type, delete, or "
+            "link a set to a machine.")
         hint.setWordWrap(True)
         top.addWidget(hint, stretch=1)
-        self.attention_box = QtGui.QCheckBox("only items needing attention")
-        self.attention_box.toggled.connect(self._toggle_attention)
-        top.addWidget(self.attention_box)
+        # A checkable button (not a checkbox) so the on/off state is visible on
+        # every FreeCAD theme — some render the checkbox indicator invisibly.
+        self.attention_button = QtGui.QPushButton("Needs attention only")
+        self.attention_button.setCheckable(True)
+        self.attention_button.setToolTip(
+            "Show only items that aren't in sync (hide everything already synced).")
+        self.attention_button.toggled.connect(self._toggle_attention)
+        top.addWidget(self.attention_button)
         layout.addLayout(top)
 
         self.tree = QtGui.QTreeWidget()
@@ -318,30 +323,20 @@ class SyncTab(_Tab):
             "attributed to the side that made the change.")
         layout.addWidget(self.diff_pane, stretch=1)
 
-        self.log_box = QtGui.QGroupBox("Log")
-        self.log_box.setCheckable(True)
-        self.log_box.setChecked(False)
-        log_layout = QtGui.QVBoxLayout(self.log_box)
-        self.log = QtGui.QTextEdit()
-        self.log.setReadOnly(True)
-        self.log.setMinimumHeight(110)
-        log_layout.addWidget(self.log)
-        self.log.setVisible(False)
-        self.log_box.toggled.connect(self.log.setVisible)
-        layout.addWidget(self.log_box, stretch=1)
-
+        # No inline log pane — apply progress goes to the status line and the
+        # FreeCAD report view; raw HTTP traffic is under Debug ▸ API log.
         buttons = QtGui.QHBoxLayout()
-        refresh = QtGui.QPushButton("Refresh Plan")
-        refresh.clicked.connect(self.refresh)
-        buttons.addWidget(refresh)
-        defaults = QtGui.QPushButton("All: Suggested")
-        defaults.setToolTip("Set every item to its suggested direction "
-                            "(conflicts stay 'leave unsynced').")
-        defaults.clicked.connect(lambda: self._set_all(default=True))
-        buttons.addWidget(defaults)
-        skip = QtGui.QPushButton("All: Skip")
-        skip.clicked.connect(lambda: self._set_all(default=False))
-        buttons.addWidget(skip)
+        self.defaults_button = QtGui.QPushButton("All: Suggested")
+        self.defaults_button.setToolTip(
+            "Set every changed item to its suggested upload/download direction. "
+            "Conflicts and deletions stay 'leave unsynced' — you decide those.")
+        self.defaults_button.clicked.connect(lambda: self._set_all(default=True))
+        buttons.addWidget(self.defaults_button)
+        self.skip_button = QtGui.QPushButton("All: Skip")
+        self.skip_button.setToolTip(
+            "Set every item to 'leave unsynced' — Apply would then do nothing.")
+        self.skip_button.clicked.connect(lambda: self._set_all(default=False))
+        buttons.addWidget(self.skip_button)
         buttons.addStretch()
         self.apply_button = QtGui.QPushButton("Apply Selected")
         self.apply_button.clicked.connect(self._run_apply)
@@ -350,7 +345,6 @@ class SyncTab(_Tab):
         layout.addLayout(buttons)
 
     def _append(self, message):
-        self.log.append(message)
         App.Console.PrintMessage("Smooth: %s\n" % message)
         QtGui.QApplication.processEvents()
 
@@ -411,18 +405,34 @@ class SyncTab(_Tab):
             self._notify("Plan ready: %d item(s) need attention.%s" % (pending, extra))
         else:
             self._notify("Everything is in sync.")
-        self.apply_button.setEnabled(pending > 0)
+        # The bulk-direction and apply controls only mean something when there is
+        # at least one changed item.
+        for b in (self.apply_button, self.defaults_button, self.skip_button):
+            b.setEnabled(pending > 0)
+
+    def _tool_type_text(self, item):
+        """The tool type to show in the 'Tool type' column for a bit row (sets
+        carry no type). From the server record's canonical shape, else a guess
+        from the name; '—' if nothing is known. A row that needs a download-time
+        type CHOICE replaces this text with the editable combo below."""
+        if item.get("kind") != "bit":
+            return ""
+        rec = item.get("record")
+        shape = (instance_shape(rec) if rec else None) \
+            or mapping.guess_shape_from_name(item.get("name") or "")
+        return shape or "—"
 
     def _add_row(self, parent, item, indent_self=False):
         label = "(this tool set)" if indent_self else item["name"]
         info = viewmodel.row_status_info(item["action"])
         status = "%s %s" % (self.STATUS_ICON.get(item["action"], ""), info["label"])
-        row = QtGui.QTreeWidgetItem([label, status, ""])
+        row = QtGui.QTreeWidgetItem([label, status, "", self._tool_type_text(item)])
         row.setToolTip(1, item["detail"] or info["hint"])
         row.setData(0, QtCore.Qt.UserRole, item["key"])
         parent.addChild(row)
+        # In-sync rows stay SELECTABLE (so they can be inspected / right-clicked);
+        # they just get no direction control.
         if item["action"] == "unchanged":
-            row.setDisabled(True)
             return
         combo = QtGui.QComboBox()
         combo.addItems(self.ROW_CHOICES.get(item["action"], self.DIRECTIONS))
@@ -523,12 +533,20 @@ class SyncTab(_Tab):
     # -- management actions (right-click) ---------------------------------
 
     def _context_menu(self, point):
+        # Select the row under the cursor first, so right-click works without a
+        # prior left-click.
+        at = self.tree.itemAt(point)
+        if at is not None:
+            self.tree.setCurrentItem(at)
         item = self._selected_item()
         if not item:
             return
         menu = QtGui.QMenu(self)
         record = item.get("record")
         is_set = item["kind"] == "library"
+        inspect = menu.addAction("Inspect record (JSON)…")
+        inspect.setEnabled(record is not None)
+        menu.addSeparator()
         rename = menu.addAction("Rename…")
         rename.setEnabled(record is not None)
         set_type = None
@@ -548,7 +566,9 @@ class SyncTab(_Tab):
         chosen = menu.exec_(self.tree.viewport().mapToGlobal(point))
         if chosen is None:
             return
-        if chosen == rename:
+        if chosen == inspect:
+            self.window.inspect_selected()
+        elif chosen == rename:
             self._rename(item)
         elif set_type is not None and chosen == set_type:
             self._set_type(item)
@@ -718,6 +738,8 @@ class MachinesTab(_Tab):
                                    "Binding"])
         self.tree.setColumnWidth(0, 240)
         self.tree.setColumnWidth(1, 200)
+        self.tree.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self._context_menu)
         self.tree.itemSelectionChanged.connect(self._selection_changed)
         self.tree.itemDoubleClicked.connect(lambda *a: self.window.inspect_selected())
         layout.addWidget(self.tree)
@@ -749,11 +771,19 @@ class MachinesTab(_Tab):
         self.del_machine.clicked.connect(self._delete_machine)
         row.addWidget(self.del_machine)
         row.addStretch()
-        refresh = QtGui.QPushButton("Refresh")
-        refresh.clicked.connect(self.refresh)
-        row.addWidget(refresh)
         layout.addLayout(row)
         self._selection_changed()
+
+    def _context_menu(self, point):
+        at = self.tree.itemAt(point)
+        if at is not None:
+            self.tree.setCurrentItem(at)
+        if self.selected_record() is None:
+            return
+        menu = QtGui.QMenu(self)
+        inspect = menu.addAction("Inspect record (JSON)…")
+        if menu.exec_(self.tree.viewport().mapToGlobal(point)) == inspect:
+            self.window.inspect_selected()
 
     def refresh(self):
         self.tree.clear()
@@ -803,10 +833,10 @@ class MachinesTab(_Tab):
             node.setExpanded(True)
 
         if model["pending"]:
-            self.summary.setText("⚠ %d entry(s) pending review — a proposed tool "
+            self.summary.setText("%d entry(s) pending review — a proposed tool "
                                  "awaits Confirm/Reject." % model["pending"])
         else:
-            self.summary.setText("✓ No pending proposals.")
+            self.summary.setText("No pending proposals.")
         self._selection_changed()
 
     def _selected(self):
@@ -939,7 +969,9 @@ class MachinesTab(_Tab):
 # ---------------------------------------------------------------------------
 
 class AuditTab(_Tab):
-    TITLE = "Audit"
+    # "Audit log" is the glossary term (Roles, Tenancy & Security) — the
+    # immutable record of who changed what, when. Read-only.
+    TITLE = "Audit log"
     HEADERS = ["Time", "Operation", "Entity", "Entity id", "Result"]
 
     def __init__(self, window, client):
@@ -952,14 +984,21 @@ class AuditTab(_Tab):
         self.tree.setColumnWidth(1, 110)
         self.tree.setColumnWidth(2, 170)
         self.tree.setColumnWidth(3, 100)
+        self.tree.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self._context_menu)
         self.tree.itemDoubleClicked.connect(lambda *a: self.window.inspect_selected())
         layout.addWidget(self.tree)
-        row = QtGui.QHBoxLayout()
-        row.addStretch()
-        refresh = QtGui.QPushButton("Refresh")
-        refresh.clicked.connect(self.refresh)
-        row.addWidget(refresh)
-        layout.addLayout(row)
+
+    def _context_menu(self, point):
+        at = self.tree.itemAt(point)
+        if at is not None:
+            self.tree.setCurrentItem(at)
+        if self.selected_record() is None:
+            return
+        menu = QtGui.QMenu(self)
+        inspect = menu.addAction("Inspect record (JSON)…")
+        if menu.exec_(self.tree.viewport().mapToGlobal(point)) == inspect:
+            self.window.inspect_selected()
 
     def refresh(self):
         self.tree.clear()
