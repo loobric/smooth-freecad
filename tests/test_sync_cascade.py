@@ -4,7 +4,7 @@
 
 """
 Tests for the sync-tab bulk-action cascade and the provenance display readers
-(uihelpers.py — pure, no FreeCAD/PySide, so they run headless).
+(viewmodel.py — pure, no FreeCAD/PySide, so they run headless).
 
 The cascade is the fix for the original complaint: set a direction on a folder
 node and it applies to every tool inside *where it makes sense*, leaving the
@@ -12,7 +12,7 @@ rest untouched.
 """
 import pytest
 
-from freecad.Smooth.uihelpers import (
+from freecad.Smooth.viewmodel import (
     cascade_choice, SKIP, LOCAL_WINS, SERVER_WINS,
     field_value, field_source, record_name, instance_shape, instance_diameter,
     short_id, fmt_dia)

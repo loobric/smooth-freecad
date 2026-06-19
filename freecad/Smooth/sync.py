@@ -6,8 +6,8 @@
 Plan / apply sync orchestration — reconcile FreeCAD tool dirs with a Smooth
 server speaking the **sectioned** tool schema (docs/TOOL_SCHEMA.md).
 
-Pure logic over the filesystem and an injected ``SmoothClient``; no FreeCAD
-imports, fully testable headless. The dialog (SmoothDialog.py) only renders the
+Pure logic over the filesystem and an injected client (``SmoothApi``); no
+FreeCAD imports, fully testable headless. The dialog (SmoothDialog.py) renders the
 plan this module computes and feeds back the per-row decisions.
 
 The model in one line: a ``.fctb`` is a **ToolInstanceRecord**, a ``.fctl`` is a

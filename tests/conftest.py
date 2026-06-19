@@ -26,7 +26,7 @@ def _set_path(canonical, path, field):
 class FakeServer:
     """In-memory stand-in for the sectioned tool-schema endpoints.
 
-    Mirrors :class:`freecad.Smooth.client.SmoothClient` method-for-method and
+    Mirrors :class:`freecad.Smooth.client.SmoothApi`'s sync-lane methods and
     returns ``{internal, canonical, clients}`` records the way smooth-core's
     ``_response`` does: create/get/list/put-section/assert/members all return
     the full record; delete returns ``{"deleted": id}``. Canonical values are
@@ -129,9 +129,6 @@ class FakeServer:
             for m in members]
         rec["internal"]["version"] += 1
         return rec
-
-    def reconcile_set(self, record_id):
-        return self.sets[record_id]
 
     def delete_set(self, record_id):
         self.sets.pop(record_id, None)

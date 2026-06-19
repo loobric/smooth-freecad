@@ -35,22 +35,28 @@ class SmoothSyncCommand:
         }
     
     def Activated(self):
-        """Execute when command is activated."""
+        """Execute when command is activated. The window is opened MODELESS so
+        FreeCAD (and the CAM tool editors) stay usable beside it; a reference is
+        kept on the command so the window isn't garbage-collected."""
         try:
             try:
                 from freecad.Smooth import SmoothDialog
             except ImportError:
                 import SmoothDialog  # flat layout on sys.path
-            dialog = SmoothDialog.SmoothWindow()
-            dialog.exec_()
+            window = SmoothDialog.SmoothWindow()
+            SmoothSyncCommand._window = window   # keep alive (modeless)
+            window.setModal(False)
+            window.show()
+            window.raise_()
+            window.activateWindow()
         except Exception as e:
-            App.Console.PrintError(f"Failed to open Smooth sync dialog: {e}\n")
+            App.Console.PrintError(f"Failed to open Smooth window: {e}\n")
             # Show error to user
             from PySide import QtGui
             QtGui.QMessageBox.critical(
                 None,
-                "Smooth Sync Error",
-                f"Failed to open sync dialog:\n\n{str(e)}"
+                "Smooth Error",
+                f"Failed to open the Smooth window:\n\n{str(e)}"
             )
     
     def IsActive(self):

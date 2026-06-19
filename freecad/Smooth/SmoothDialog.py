@@ -5,16 +5,17 @@
 """
 Smooth — the tabbed desktop window.
 
-An exceptions-first shell: **Needs Attention** is the primary tab (aggregating
-CAM-content and machine-coverage exceptions — the old Coverage tab folds in
-here), followed by the hierarchical **Libraries** browser and the operator-lane
-tabs (Inbox · Tools · Tool Sets · Machines · Audit) over a single shared
-``SmoothClient`` (so all HTTP traffic lands in one call log). A shared header
-shows the server + connection state; a bottom bar offers raw-record JSON
-inspection and a live API log.
+A deliberately small shell of three tabs over a single shared API client (so all
+HTTP traffic lands in one call log): **Sync** (the one CAM surface — plan/apply
+of the local tool directory, with a needs-attention filter and per-set/-tool
+management), **Machines** (the one binding surface — tool tables with the Inbox
+folded in), and **Audit**. A header shows the server + connection state; raw
+sectioned-record JSON inspection and a live API log are demoted behind a
+**Debug** menu. The window is modeless so FreeCAD stays usable beside it.
 
 All behavior lives in the headless-tested modules (client.py, sync.py,
-mapping.py) and in SmoothTabs.py; this file is the shell that wires them up.
+mapping.py) and the pure view-model (viewmodel.py) consumed by SmoothTabs.py;
+this file is the shell that wires them up.
 """
 import json
 from pathlib import Path
@@ -24,7 +25,7 @@ import FreeCAD as App
 from PySide import QtGui, QtCore
 
 from . import SmoothTabs
-from .client import SmoothClient, SmoothError
+from .client import SmoothApi, SmoothError
 
 
 class SmoothConfig:
@@ -69,14 +70,15 @@ def get_tools_dir() -> Path:
 
 
 class SmoothWindow(QtGui.QDialog):
-    """Tabbed Smooth window. Opens on the Needs Attention tab; other tabs
-    lazy-load when first shown. One client is shared by every tab."""
+    """Tabbed Smooth window. Opens on the Sync tab; other tabs lazy-load when
+    first shown. One client is shared by every tab. Modeless (see the command),
+    so FreeCAD stays usable alongside it."""
 
     def __init__(self):
         super().__init__()
         self.config = SmoothConfig.load()
-        self.client = SmoothClient(self.config["api_url"],
-                                   self.config.get("api_key", ""))
+        self.client = SmoothApi(self.config["api_url"],
+                                self.config.get("api_key", ""))
         self._api_panel = None
         self._build_ui()
 
@@ -96,17 +98,10 @@ class SmoothWindow(QtGui.QDialog):
 
         self.tabs = QtGui.QTabWidget()
         tools_dir = str(get_tools_dir())
-        # Needs Attention is the primary, exceptions-first view; the old
-        # standalone Coverage tab folds into it as one exception stream.
-        self.attention_tab = SmoothTabs.NeedsAttentionTab(self, self.client,
-                                                          tools_dir)
+        # The one CAM surface; binding lives on Machines; Audit is read-only.
         self.sync_tab = SmoothTabs.SyncTab(self, self.client, tools_dir)
         self._tab_list = [
-            self.attention_tab,
             self.sync_tab,
-            SmoothTabs.InboxTab(self, self.client),
-            SmoothTabs.ToolsTab(self, self.client),
-            SmoothTabs.ToolSetsTab(self, self.client),
             SmoothTabs.MachinesTab(self, self.client),
             SmoothTabs.AuditTab(self, self.client),
         ]
@@ -119,15 +114,17 @@ class SmoothWindow(QtGui.QDialog):
         self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
 
+        # Raw-record inspection and the live API log are diagnostics, not primary
+        # chrome — they live behind a Debug menu.
         bar = QtGui.QHBoxLayout()
-        inspect = QtGui.QPushButton("Inspect JSON")
-        inspect.setToolTip("Show the raw sectioned record for the selected row.")
-        inspect.clicked.connect(self.inspect_selected)
-        bar.addWidget(inspect)
-        api_log = QtGui.QPushButton("API Log")
-        api_log.setToolTip("Live view of the HTTP requests this window makes.")
-        api_log.clicked.connect(self.show_api_log)
-        bar.addWidget(api_log)
+        debug = QtGui.QPushButton("Debug ▾")
+        debug_menu = QtGui.QMenu(debug)
+        act_inspect = debug_menu.addAction("Inspect selected record (JSON)…")
+        act_inspect.triggered.connect(self.inspect_selected)
+        act_log = debug_menu.addAction("API log…")
+        act_log.triggered.connect(self.show_api_log)
+        debug.setMenu(debug_menu)
+        bar.addWidget(debug)
         bar.addStretch()
         close = QtGui.QPushButton("Close")
         close.clicked.connect(self.accept)
@@ -136,13 +133,21 @@ class SmoothWindow(QtGui.QDialog):
 
     # -- lifecycle --------------------------------------------------------
 
+    def showEvent(self, event):
+        """Modeless open: kick the connection check + first load once shown."""
+        super().showEvent(event)
+        if not getattr(self, "_opened", False):
+            self._opened = True
+            QtCore.QTimer.singleShot(50, self._on_open)
+
     def exec_(self):
-        QtCore.QTimer.singleShot(50, self._on_open)
+        # Retained for back-compat; the workbench command now opens modeless via
+        # show(). showEvent drives the open either way.
         return super().exec_()
 
     def _on_open(self):
         self._check_connection()
-        self.attention_tab.ensure_loaded()   # the default, primary tab
+        self.sync_tab.ensure_loaded()        # the default, primary tab
 
     def _check_connection(self):
         try:

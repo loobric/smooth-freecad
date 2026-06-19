@@ -113,9 +113,10 @@ class SmoothPreferencePage:
         self.load_settings()
     
     def test_connection(self):
-        """Test connection to Smooth server via the same stdlib client the
-        sync uses (SmoothClient.ping hits {base}/api/health). Avoids a
-        dependency on `requests`, which FreeCAD's bundled Python may not have."""
+        """Test connection to the Smooth server via the same stdlib client the
+        sync uses (``SmoothApi.ping`` makes a cheap authenticated round-trip).
+        Avoids a dependency on `requests`, which FreeCAD's bundled Python may not
+        have."""
         url = self._normalize_url(self.url_edit.text().strip())
         api_key = self.key_edit.text().strip()
 
@@ -124,12 +125,12 @@ class SmoothPreferencePage:
             return
 
         try:
-            from freecad.Smooth.client import SmoothClient, SmoothError
+            from freecad.Smooth.client import SmoothApi, SmoothError
         except ImportError:
-            from client import SmoothClient, SmoothError  # flat layout
+            from client import SmoothApi, SmoothError  # flat layout
 
         try:
-            SmoothClient(url, api_key).ping()
+            SmoothApi(url, api_key).ping()
             self.status_label.setText("✓ Connection successful!")
             App.Console.PrintMessage(
                 f"Successfully connected to Smooth server at {url}\n")

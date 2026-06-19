@@ -3,149 +3,153 @@
 # SPDX-License-Identifier: MIT
 
 """
-Tests for the operator-lane client methods (inbox, slots, machines, audit) and
-the call log that feeds the GUI's API-log debug panel.
+Tests for the operator-lane adapter methods (inbox, tool-table entries, machines,
+audit) and the call log that feeds the GUI's API-log debug panel.
 
-As in test_client_sectioned, everything funnels through the single seam
-http_json(), so we stub exactly that and assert the method, URL, and body each
-method emits — proving the client speaks the frozen operator-lane endpoints.
+As in test_client_sectioned, everything funnels through loobric's single
+transport seam, so we inject a fake transport and assert the method, endpoint,
+and body each method emits — proving the adapter speaks the frozen operator-lane
+endpoints. Binding lives on ONE surface now; 'Adopt' is gone — minting a new tool
+from an entry is just ``bind`` with no instance_id (REBOOT R2).
 """
 import pytest
 
-from freecad.Smooth import client as client_mod
-from freecad.Smooth.client import SmoothClient, SmoothError, HUMAN_ACTOR
+from freecad.Smooth import loobric
+from freecad.Smooth.client import SmoothApi, SmoothError, HUMAN_ACTOR
+
+
+def _api(transport):
+    client = SmoothApi("https://smooth.example/", api_key="k", transport=transport)
+    return client
 
 
 @pytest.fixture
-def calls(monkeypatch):
-    """Capture every http_json call; return a canned response that satisfies
-    every unwrap the client does ('items', 'logs', and action envelopes)."""
+def api():
+    """A SmoothApi over a fake transport recording every request; the canned
+    response satisfies every unwrap the adapter does ('items', 'logs', …)."""
     captured = []
 
-    def fake_http_json(method, url, api_key, body=None, timeout=None):
-        captured.append({"method": method, "url": url, "body": body})
+    def transport(method, endpoint, **kw):
+        captured.append({"method": method, "endpoint": endpoint, "body": kw.get("body")})
         return {"items": [], "logs": [], "status": "ok",
-                "internal": {"id": "rec-1"}, "instance_id": "inst-1",
-                "entry": {}, "deleted": "x", "unreconciled": []}
+                "internal": {"id": "rec-1"}, "instance_id": "inst-1", "deleted": "x"}
 
-    monkeypatch.setattr(client_mod, "http_json", fake_http_json)
-    return captured
-
-
-@pytest.fixture
-def smooth():
-    return SmoothClient("https://smooth.example/", api_key="k")
+    client = _api(transport)
+    client._captured = captured
+    return client
 
 
-def last(calls):
-    return calls[-1]
+def last(api):
+    return api._captured[-1]
 
 
 # -- Inbox -------------------------------------------------------------------
 
 @pytest.mark.unit
-def test_list_inbox_unwraps_items(smooth, calls):
-    assert smooth.list_inbox() == []
-    c = last(calls)
+def test_list_inbox_unwraps_items(api):
+    assert api.list_inbox() == []
+    c = last(api)
     assert c["method"] == "GET"
-    assert c["url"].endswith("/api/v1/instance-inbox")
+    assert c["endpoint"] == "/instance-inbox"
 
 
 @pytest.mark.unit
-def test_confirm_and_reject_proposal(smooth, calls):
-    smooth.confirm_proposal("p-1")
-    c = last(calls)
+def test_confirm_and_reject_proposal(api):
+    api.confirm_proposal("p-1")
+    c = last(api)
     assert c["method"] == "POST"
-    assert c["url"].endswith("/instance-inbox/p-1/confirm")
+    assert c["endpoint"] == "/instance-inbox/p-1/confirm"
     assert c["body"] is None
 
-    smooth.reject_proposal("p-1")
-    assert last(calls)["url"].endswith("/instance-inbox/p-1/reject")
+    api.reject_proposal("p-1")
+    assert last(api)["endpoint"] == "/instance-inbox/p-1/reject"
 
 
-# -- Tool table entries / slots ----------------------------------------------
-
-@pytest.mark.unit
-def test_list_entries_optionally_filters_by_machine(smooth, calls):
-    smooth.list_entries()
-    assert last(calls)["url"].endswith("/tool-table-entry-records")
-
-    smooth.list_entries(machine_id="m-9")
-    assert last(calls)["url"].endswith("/tool-table-entry-records?machine_id=m-9")
-
+# -- Tool table entries ------------------------------------------------------
 
 @pytest.mark.unit
-def test_bind_entry_carries_instance_actor_and_move(smooth, calls):
-    smooth.bind_entry("slot-1", "inst-2")
-    c = last(calls)
+def test_list_entries_optionally_filters_by_machine(api):
+    api.list_entries()
+    assert last(api)["endpoint"] == "/tool-table-entry-records"
+
+    api.list_entries(machine_id="m-9")
+    assert last(api)["endpoint"] == "/tool-table-entry-records?machine_id=m-9"
+
+
+@pytest.mark.unit
+def test_bind_entry_carries_instance_actor_and_move(api):
+    api.bind_entry("entry-1", "inst-2")
+    c = last(api)
     assert c["method"] == "POST"
-    assert c["url"].endswith("/tool-table-entry-records/slot-1/bind")
-    assert c["body"] == {"instance_id": "inst-2", "actor": HUMAN_ACTOR,
-                         "move": False}
+    assert c["endpoint"] == "/tool-table-entry-records/entry-1/bind"
+    # move is omitted unless requested (loobric's body shape)
+    assert c["body"] == {"instance_id": "inst-2", "actor": HUMAN_ACTOR}
 
-    smooth.bind_entry("slot-1", "inst-2", move=True)
-    assert last(calls)["body"]["move"] is True
+    api.bind_entry("entry-1", "inst-2", move=True)
+    assert last(api)["body"]["move"] is True
 
 
 @pytest.mark.unit
-def test_unbind_and_delete_entry(smooth, calls):
-    smooth.unbind_entry("slot-1")
-    c = last(calls)
+def test_bind_new_mints_by_omitting_instance_id(api):
+    # 'Bind new' (was 'Adopt'): no instance_id tells the server to mint.
+    api.bind_new("entry-1")
+    c = last(api)
+    assert c["endpoint"] == "/tool-table-entry-records/entry-1/bind"
+    assert "instance_id" not in c["body"]
+    assert c["body"] == {"actor": HUMAN_ACTOR}
+
+    api.bind_new("entry-1", name="3mm drill")
+    assert last(api)["body"] == {"name": "3mm drill", "actor": HUMAN_ACTOR}
+
+
+@pytest.mark.unit
+def test_unbind_and_delete_entry(api):
+    api.unbind_entry("entry-1")
+    c = last(api)
     assert c["method"] == "POST"
-    assert c["url"].endswith("/tool-table-entry-records/slot-1/unbind")
+    assert c["endpoint"] == "/tool-table-entry-records/entry-1/unbind"
     assert c["body"] is None
 
-    smooth.delete_entry("slot-1")
-    c = last(calls)
+    api.delete_entry("entry-1")
+    c = last(api)
     assert c["method"] == "DELETE"
-    assert c["url"].endswith("/tool-table-entry-records/slot-1")
-
-
-@pytest.mark.unit
-def test_adopt_entry_omits_name_unless_given(smooth, calls):
-    smooth.adopt_entry("slot-1")
-    c = last(calls)
-    assert c["url"].endswith("/tool-table-entry-records/slot-1/adopt")
-    assert c["body"] == {"actor": HUMAN_ACTOR}            # no name key
-
-    smooth.adopt_entry("slot-1", name="3mm drill")
-    assert last(calls)["body"] == {"actor": HUMAN_ACTOR, "name": "3mm drill"}
+    assert c["endpoint"] == "/tool-table-entry-records/entry-1"
 
 
 # -- Machines ----------------------------------------------------------------
 
 @pytest.mark.unit
-def test_list_get_delete_machine(smooth, calls):
-    smooth.list_machines()
-    assert last(calls)["url"].endswith("/machine-records")
+def test_list_get_delete_machine(api):
+    api.list_machines()
+    assert last(api)["endpoint"] == "/machine-records"
 
-    smooth.get_machine("m-1")
-    assert last(calls)["url"].endswith("/machine-records/m-1")
+    api.get_machine("m-1")
+    assert last(api)["endpoint"] == "/machine-records/m-1"
 
-    smooth.delete_machine("m-1")
-    c = last(calls)
+    api.delete_machine("m-1")
+    c = last(api)
     assert c["method"] == "DELETE"
-    assert c["url"].endswith("/machine-records/m-1")
+    assert c["endpoint"] == "/machine-records/m-1"
 
 
 # -- Audit -------------------------------------------------------------------
 
 @pytest.mark.unit
-def test_list_audit_unwraps_logs_with_limit(smooth, calls):
-    assert smooth.list_audit(limit=25) == []
-    c = last(calls)
+def test_list_audit_unwraps_logs_and_caps_client_side(api):
+    assert api.list_audit(limit=25) == []
+    c = last(api)
     assert c["method"] == "GET"
-    assert c["url"].endswith("/audit-logs?limit=25")
+    assert c["endpoint"] == "/audit-logs"
 
 
 # -- Call log (the API-log debug panel's data source) ------------------------
 
 @pytest.mark.unit
-def test_call_log_records_each_request_with_status(smooth, calls):
-    smooth.list_machines()
-    smooth.confirm_proposal("p-1")
-    assert len(smooth.call_log) == 2
-    entry = smooth.call_log[-1]
+def test_call_log_records_each_request_with_status(api):
+    api.list_machines()
+    api.confirm_proposal("p-1")
+    assert len(api.call_log) == 2
+    entry = api.call_log[-1]
     assert entry["method"] == "POST"
     assert entry["path"] == "/instance-inbox/p-1/confirm"
     assert entry["status"] == 200
@@ -154,23 +158,22 @@ def test_call_log_records_each_request_with_status(smooth, calls):
 
 
 @pytest.mark.unit
-def test_call_log_records_failures_with_status(monkeypatch, smooth):
-    def boom(method, url, api_key, body=None, timeout=None):
-        raise SmoothError("HTTP 409 ... already installed", status=409)
+def test_call_log_records_failures_with_status():
+    def boom(method, endpoint, **kw):
+        raise loobric.HTTPError(409, "instance ... already installed")
 
-    monkeypatch.setattr(client_mod, "http_json", boom)
-    with pytest.raises(SmoothError):
-        smooth.bind_entry("slot-1", "inst-2")
-    entry = smooth.call_log[-1]
+    api = _api(boom)
+    with pytest.raises(SmoothError):           # SmoothError == loobric.LoobricError
+        api.bind_entry("entry-1", "inst-2")
+    entry = api.call_log[-1]
     assert entry["status"] == 409
     assert "already installed" in entry["error"]
 
 
 @pytest.mark.unit
-def test_call_log_is_capped(monkeypatch, smooth):
-    monkeypatch.setattr(client_mod, "http_json",
-                        lambda *a, **k: {"items": []})
-    smooth.CALL_LOG_LIMIT = 5
+def test_call_log_is_capped():
+    api = _api(lambda *a, **k: {"items": []})
+    api.CALL_LOG_LIMIT = 5
     for _ in range(20):
-        smooth.list_machines()
-    assert len(smooth.call_log) == 5
+        api.list_machines()
+    assert len(api.call_log) == 5
