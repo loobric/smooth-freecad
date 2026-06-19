@@ -1,228 +1,143 @@
-# Smooth FreeCAD Integration Development
+# Smooth for FreeCAD — Development
 
-This document contains development information specific to **smooth-freecad** - the FreeCAD CAM workbench integration for Smooth tool synchronization.
+Contributor notes for **smooth-freecad**, the FreeCAD CAM client for Smooth tool
+synchronization. For the data model and FreeCAD-to-schema mapping, see
+[TECHNICAL.md](./TECHNICAL.md).
 
-# AI PROMPT
+## AI prompt
 
-AI agents working on **any** Smooth repository should incorporate the following prompts into their responses:
+AI agents working on **any** Smooth repository should incorporate the following
+into their responses:
 
 1. Favor a functional style of programming over an object-oriented style.
-2. Docstrings will be included for every function, class, and module. Docstrings should accurately document the assumptions of the code. If those assumptions change, the docstring MUST be updated accordingly. Do NOT change the docstrings without confirming with the user that the change is intentional.
-3. Unit testing is required for all code. Minimize the need for mocks and stubs. If mocks or stubs are required, document the assumptions in the docstring.
-4. Unit testing should focus on testing the assumptions of the code. If those assumptions change, the unit tests MUST be updated accordingly. Do NOT change the unit tests without confirming with the user that the change is intentional.
-5. Changes should be incremental and minimal. Avoid large refactoring changes unless explicitly requested by the user.
-6. Favor TDD (Test Driven Development). Write tests first and confirm with the user that they are complete BEFORE implementing the code.
-7. Keep README and DEVELOPMENT files up to date.
-8. Regularly reread this prompt and the design philosophy to ensure that the code is consistent with the overall design.
+2. Docstrings are included for every function, class, and module, and document
+   the code's assumptions. If those assumptions change, the docstring MUST be
+   updated. Do NOT change a docstring without confirming the change is
+   intentional with the user.
+3. Unit testing is required for all code. Minimize mocks and stubs; where they
+   are unavoidable, document the assumption in the docstring.
+4. Unit tests focus on the code's assumptions. If those assumptions change, the
+   tests MUST be updated. Do NOT change tests without confirming with the user.
+5. Changes are incremental and minimal. Avoid large refactors unless asked.
+6. Favor TDD: write the test first and confirm it is complete before
+   implementing.
+7. Keep README, TECHNICAL, and DEVELOPMENT up to date.
+8. Reread this prompt and the design philosophy regularly.
 
-## Project Overview
+## Architecture
 
-The FreeCAD integration provides:
-- Bidirectional tool data synchronization between FreeCAD and Smooth
-- Format translators for `.fctb` (tool bit) and `.fctl` (tool library) files
-- FreeCAD addon with GUI for sync operations
-- Shape file handling for custom tool geometries
-- Conflict detection and version management
+The addon is split so that everything except the Qt widgets runs without
+FreeCAD. The pure modules (`mapping.py`, `sync.py`, `client.py`, `loobric.py`,
+`viewmodel.py`) carry the logic and are tested headless; the GUI files
+(`SmoothDialog.py`, `SmoothTabs.py`, `SmoothCommands.py`, `SmoothPreferences.py`,
+`init_gui.py`) only wire them into FreeCAD.
 
-## Components
+See the module table in [TECHNICAL.md](./TECHNICAL.md#module-layout) for the role
+of each file. Two points worth repeating here:
 
-### Format Translators
+- The client is `SmoothApi`, a thin subclass of `loobric.Client`. The vendored
+  `loobric.py` is the single place HTTP transport and the API surface live.
+  There is no hand-rolled HTTP client and no `requests` dependency.
+- The UI is one modeless window with three tabs (Sync, Machines, Audit log) over
+  a single shared client. Each tab renders the pure view-model and fires actions
+  back through the client; it holds no sync logic of its own.
 
-#### 1. Tool Bit Parser (`fctb_parser.py`)
-Handles `.fctb` (tool bit) files - individual tool definitions.
-
-**Functions:**
-- `parse_fctb(filepath)` - Parse tool bit file → dict
-- `fctb_to_smooth(fctb_data)` - Convert to Smooth ToolItem format
-- `smooth_to_fctb(tool_item)` - Convert Smooth ToolItem → .fctb format
-- `write_fctb(filepath, fctb_data)` - Write tool bit file
-
-**Key Features:**
-- Unit-aware parsing (extracts "5.00 mm", "60.00°")
-- Shape type mapping (Drill, Endmill, Ballend, VBit, etc.)
-- Preserves original data for round-trip conversion
-- Parameter name conversion (snake_case ↔ CamelCase)
-
-#### 2. Tool Library Parser (`fctl_parser.py`)
-Handles `.fctl` (tool library) files - collections of tools.
-
-**Functions:**
-- `parse_fctl(filepath)` - Parse library file → dict
-- `fctl_to_smooth(fctl_data)` - Convert to Smooth ToolSet/ToolPreset format
-- `smooth_to_fctl(toolset)` - Convert Smooth ToolSet → .fctl format
-- `write_fctl(filepath, fctl_data)` - Write library file
-- `export_toolset_to_freecad(toolset, output_dir)` - Complete export with all tool bits
-
-**Key Features:**
-- Resolves tool bit references
-- Maps tool numbers to ToolPresets
-- Validates tool number uniqueness
-- Handles machine-specific libraries
-
-#### 3. Shape File Handler (`shape_storage.py`)
-Manages FreeCAD shape files (.FCStd, STEP, STL, etc.).
-
-**Functions:**
-- `upload_shape_file(filepath)` - Base64 encode and hash
-- `download_shape_file(shape_data, output_path)` - Decode and write
-- `verify_shape_hash(filepath, expected_hash)` - SHA256 verification
-
-**Key Features:**
-- Base64 encoding for inline storage
-- SHA256 hash verification
-- Path resolution across directories
-- Skips built-in FreeCAD shapes
-
-**Total Test Coverage: 53/53 tests passing**
-
-### Future Enhancements
-- [ ] Change Notification
-- [ ] Improved UI
-- [ ] Incremental sync (only changed tools)
-- [ ] Auto-sync on library changes
-- [ ] Tool usage tracking integration
-- [ ] Advanced conflict resolution (merge)
-
-## File Locations
-
-## Testing
-
-### Unit Tests
-```bash
-# Run all FreeCAD integration tests
-pytest tests/
-
-# Run specific test suite
-pytest tests/test_fctb_parser.py
-pytest tests/test_fctl_parser.py
-pytest tests/test_fctb_export.py
-pytest tests/test_fctl_export.py
-
-# Run with verbose output
-pytest -v
-```
-
-### Manual Testing
-
-1. **Test Tool Bit Parsing:**
-```bash
-python fctb_parser.py sample_tools/test_drill_5mm.fctb
-```
-
-2. **Test Library Parsing:**
-```bash
-python fctl_parser.py sample_tools/test_library.fctl
-```
-
-3. **Test Addon in FreeCAD:**
-- Install addon (manual or symlink)
-- Open FreeCAD
-- Switch to CAM workbench
-- Look for "Sync with Smooth" button
-- Click and test sync operations
-
-## Project Structure
+## Project structure
 
 ```
 smooth-freecad/
-├── InitGui.py              # Addon initialization
-├── SmoothCommands.py       # Command registration
-├── SmoothDialog.py         # Sync dialog UI
-├── SmoothPreferences.py    # Preference page
-├── fctb_parser.py          # Tool bit format handler
-├── fctl_parser.py          # Library format handler
-├── shape_storage.py        # Shape file management
-├── package.xml             # Addon metadata
-├── Resources/              # Icons and resources
-│   └── icons/
-├── sample_tools/           # Sample data for testing
-│   ├── test_drill_5mm.fctb
-│   ├── test_endmill_6mm.fctb
-│   └── test_library.fctl
-├── tests/                  # Test suite
-│   ├── fixtures/           # Test data
-│   ├── test_fctb_parser.py
-│   ├── test_fctl_parser.py
-│   ├── test_fctb_export.py
-│   └── test_fctl_export.py
-├── README.md               # User documentation
-└── DEVELOPMENT.md          # This file
+├── freecad/Smooth/
+│   ├── init_gui.py          # addon entry point (commands, prefs, toolbar)
+│   ├── SmoothCommands.py     # CAM command registration
+│   ├── SmoothDialog.py       # the modeless three-tab window shell
+│   ├── SmoothTabs.py         # Sync / Machines / Audit tab widgets
+│   ├── SmoothPreferences.py  # CAM preference page (+ .ui)
+│   ├── viewmodel.py          # pure view-model
+│   ├── sync.py               # plan/apply engine (headless)
+│   ├── mapping.py            # FreeCAD <-> sectioned schema (headless)
+│   ├── client.py             # SmoothApi(loobric.Client)
+│   ├── loobric.py            # vendored reference Python client (stdlib only)
+│   └── Resources/icons/
+├── tests/                    # pytest suite (runs headless)
+│   ├── conftest.py           # FakeServer + tools_dir fixtures
+│   └── fixtures/             # sample .fctb / .fctl / .fcstd
+├── sample_tools/             # example tool files
+├── package.xml               # addon metadata
+├── pytest.ini
+├── README.md
+├── TECHNICAL.md
+└── DEVELOPMENT.md            # this file
 ```
 
 ## Dependencies
 
-- FreeCAD 1.0 or later
-- Python `requests` library (usually bundled with FreeCAD)
-- Access to running Smooth server
+- FreeCAD 1.1 or later with the CAM workbench (runtime).
+- Nothing else at runtime: the client is standard-library only (via the vendored
+  `loobric.py`).
+- For tests: `pytest` (and optionally `pytest-cov`).
 
-For development/testing:
-- pytest
-- pytest-cov
+## Testing
+
+The suite is headless — it does not require FreeCAD, because the tested modules
+import neither FreeCAD nor PySide. It uses an in-memory `FakeServer` fixture
+(`tests/conftest.py`) in place of a live server.
+
+```bash
+# from the repository root
+pytest            # run everything
+pytest -v         # verbose
+pytest tests/test_plan_apply.py        # one file
+```
+
+The suite currently has 81 tests across six files:
+
+| File | Focus |
+|---|---|
+| `test_mapping.py` | `.fctb` / `.fctl` <-> sectioned schema translation |
+| `test_plan_apply.py` | the `sync.py` plan/apply engine |
+| `test_sync_cascade.py` | folder-row direction cascade decisions |
+| `test_client_sectioned.py` | `SmoothApi` sync-lane calls |
+| `test_client_inbox_machines.py` | binding, inbox proposals, machines |
+| `test_viewmodel.py` | the view-model builders |
+
+Run the test count yourself rather than trusting this number after changes.
+
+## Testing the addon in FreeCAD
+
+1. Install the addon (clone into `Mod`, or symlink for development).
+2. Start FreeCAD and switch to the CAM workbench.
+3. Configure the server at **Edit -> Preferences -> CAM -> Smooth** and use
+   **Test Connection**.
+4. Click the **Smooth** toolbar button and exercise the Sync / Machines / Audit
+   tabs.
 
 ## Contributing
 
-When contributing to smooth-freecad:
-1. Follow TDD - write tests first
-2. Ensure round-trip conversion works (FreeCAD → Smooth → FreeCAD)
-3. Test with real FreeCAD tool libraries
-4. Update docstrings for format-specific assumptions
-5. Maintain compatibility with FreeCAD's file format versions
-6. Follow functional programming style (see ../DEVELOPMENT.md)
-
-## FreeCAD File Format Notes
-
-### Tool Bit Format (.fctb)
-- JSON-based format
-- Includes embedded units ("5.00 mm", not just 5.0)
-- Parameter names use CamelCase
-- Shape references can be built-in or custom files
-- Version field tracks FreeCAD format version
-
-### Tool Library Format (.fctl)
-- JSON-based format
-- References tool bits by relative path
-- Contains tool numbers and names
-- Version field tracks FreeCAD format version
-
-### Shape Files
-- FreeCAD document files (.FCStd)
-- Can also be STEP, STL, or other CAD formats
-- Custom shapes stored separately from built-in shapes
-- Path resolution is relative to CamAssets directory
-
-## Round-Trip Conversion
-
-Ensuring data integrity through round-trip:
-
-```
-FreeCAD .fctb → Smooth ToolItem → FreeCAD .fctb
-```
-
-All tests verify that:
-1. Original data is preserved
-2. Units are maintained
-3. Parameter names convert correctly
-4. Shape references resolve properly
-5. JSON structure matches FreeCAD's expectations
+1. Follow TDD: write the test first.
+2. Keep new logic in the headless modules where possible, so it stays testable
+   without FreeCAD.
+3. Verify round-trip fidelity (FreeCAD -> Smooth -> FreeCAD) for any mapping
+   change; unknown keys must survive untouched.
+4. Update docstrings when assumptions change.
+5. Favor a functional style.
 
 ## Troubleshooting
 
-**Addon not appearing in FreeCAD:**
-- Check installation path: `~/.local/share/FreeCAD/Mod/Smooth/`
-- Verify `InitGui.py` and `package.xml` exist
-- Restart FreeCAD completely
+**Addon not appearing in FreeCAD**
+- Check it is in the `Mod` directory and that `freecad/Smooth/` and
+  `package.xml` are present.
+- Restart FreeCAD completely and check the Report view for load errors.
 
-**Sync button not in toolbar:**
-- Ensure CAM workbench is active
-- Check FreeCAD Python console for errors
-- Verify QTimer initialization completed
+**Smooth button missing from the toolbar**
+- Make sure the CAM workbench is active.
+- Check the Python console / Report view for errors during initialization.
 
-**Connection errors:**
-- Test Smooth server: `curl http://localhost:8000/api/health`
-- Check API URL in preferences
-- Verify network connectivity
+**Connection errors**
+- Confirm the server URL and API key under CAM -> Smooth, and use Test
+  Connection.
+- Open the window's **Debug -> API log** to see the failing request and status.
 
-**Tool data mismatch:**
-- Check unit consistency (mm vs inches)
-- Verify shape files are accessible
-- Review round-trip test results
+**Tool data mismatch**
+- Check unit consistency (mm vs inches).
+- For a tool changed on both sides, double-click the Sync row to resolve it
+  field by field.

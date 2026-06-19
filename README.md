@@ -1,181 +1,123 @@
-# ![Smooth Logo](Resources/icons/Smooth.svg) Smooth - Tool Library Synchronization for FreeCAD
+# Smooth for FreeCAD
 
-![FreeCAD Version](https://img.shields.io/badge/FreeCAD-0.21+-blue.svg) ![License](https://img.shields.io/badge/License-MIT-green.svg) ![CAM Workbench](https://img.shields.io/badge/CAM-Workbench-orange.svg)
+Synchronize FreeCAD's CAM tool libraries with a Smooth tool-data server, so the
+same tools stay consistent across FreeCAD, CNC controllers, and other shop
+systems.
 
-Keep tool libraries synchronized across FreeCAD, CNC controllers, and tool
-management systems.
+This addon is the FreeCAD client for **Smooth**. It adds a "Smooth" button to
+the CAM workbench and a preference page for server settings. It does not create
+a separate workbench.
 
----
+> Alpha software. The data model and UI are still settling as part of the v2
+> rework. Expect rough edges.
 
 ## The problem
 
-Tool data usually lives in several places at once:
+Tool data usually lives in several places at once: FreeCAD (for CAM
+programming), the CNC controller (LinuxCNC and others), spreadsheets, and
+shop-floor lists. When a tool changes, every copy has to be updated by hand, the
+copies drift apart, and the mismatches cause scrapped parts and wasted time.
 
-- FreeCAD, for CAM programming
-- the CNC controller (LinuxCNC and others), for machining
-- spreadsheets, for inventory
-- shop-floor paper lists
-- simulators such as Camotics
+Smooth keeps one server-side source of truth and syncs the clients to it. This
+addon connects FreeCAD's CAM workbench to that server.
 
-When a tool changes — a new tool, a new insert, a wear offset, a replacement —
-each of those has to be updated by hand. The copies drift apart, and the
-mismatches cause scrapped parts and wasted time.
+## Requirements
 
-## What Smooth does
+- FreeCAD 1.1 or later, with the CAM workbench
+- A running Smooth server, self-hosted (see
+  [smooth-core](https://github.com/loobric/smooth-core)) or hosted
+- No extra Python packages. The client is standard-library only; it vendors
+  `loobric.py` (the single-file reference Python client) and uses nothing beyond
+  what FreeCAD already ships.
 
-Smooth is a tool synchronization system that keeps these libraries in sync. This
-addon connects FreeCAD's CAM workbench to a Smooth server.
+## Install
 
-```
-┌─────────────┐         ┌──────────────┐         ┌─────────────┐
-│   FreeCAD   │◄────────┤    Smooth    │────────►│  LinuxCNC   │
-│  CAM Tools  │         │ Central Hub  │         │ Tool Table  │
-└─────────────┘         └──────────────┘         └─────────────┘
-                              ▲
-                              │
-                        ┌─────┴──────┐
-                        │  Web UI    │
-                        │ (planned)  │
-                        └────────────┘
-```
+Addon Manager listing is planned but not yet submitted, so install manually by
+cloning into FreeCAD's `Mod` directory:
 
-It syncs in both directions: FreeCAD to the server, and the server to FreeCAD.
-
----
-
-## What does this addon do?
-
-### Export tools to Smooth
-- Upload your FreeCAD tool bits to the server
-- Share tools across multiple machines and workstations
-- Keep a server-side backup of your tool data
-
-### Import tools from Smooth
-- Download tool data from the server into FreeCAD
-- Keep multiple FreeCAD installations in sync
-
-> **Current limitations (alpha):** custom shape files are *not* uploaded or downloaded —
-> tool records reference shapes by path only. Holder/assembly data is not synchronized.
-> See the [v2 plan](https://github.com/loobric/smooth-core/issues/3) for the rework that
-> addresses these.
-
-### **Version History (server-side)**
-- The Smooth server keeps version history and an audit trail of every change
-- History browsing from inside the addon is under development
-
-### **Conflict Handling**
-- The server rejects stale writes (optimistic locking), so simultaneous edits
-  cannot silently overwrite each other
-- A guided conflict-resolution flow is planned for the v2 rework — today, a rejected
-  sync must be retried after re-importing
-
----
-
-## Quick Start
-
-### Installation
-
-**Manual Installation** (Addon Manager listing is planned, not yet submitted)
 ```bash
-mkdir -p ~/.local/share/FreeCAD/Mod
-git clone https://github.com/loobric/smooth-freecad.git 
+# Linux
+git clone https://github.com/loobric/smooth-freecad.git \
+  ~/.local/share/FreeCAD/Mod/smooth-freecad
 ```
 
-### First-Time Setup (2 minutes)
+On other platforms, clone into the `Mod` directory shown in FreeCAD at
+**Edit -> Preferences -> General -> (paths)**, then restart FreeCAD.
 
-**Step 1: Find a Smooth Server**
-Run your own Smooth server (see [smooth-core](https://github.com/loobric/smooth-core)). A hosted option is planned but not yet available.
+## Configure
 
-Get the server url and an API key from the server.
+1. Open **Edit -> Preferences -> CAM -> Smooth**.
+2. Enter the server URL and your API key (get both from your Smooth server).
+3. Click **Test Connection**, then **Apply**.
 
+Settings are stored in `~/.config/smooth/freecad.json`.
 
-**Step 2: Configure FreeCAD**
+## Using it
 
-1. Go to **Edit → Preferences → CAM → Smooth**
-2. Enter the server URL
-3. Enter the API key
-4. Click **Test Connection**
-5. Click **Apply** to save
+Switch to the **CAM** workbench and click the **Smooth** button. A modeless
+window opens (FreeCAD stays usable beside it) with three tabs.
 
-**Step 3: Sync**
+### Sync
 
-1. Switch to the **CAM Workbench**
-2. Click the **Sync with Smooth** button in the toolbar
-3. Choose **Export** or **Import**
+The one place tools move between FreeCAD and the server. It shows a tree of every
+tool set and its tools, comparing your local tool directory against the server.
+Each changed row gets a direction:
 
----
+- upload local -> server
+- download server -> local
+- leave unsynced
 
-## How It Works
+A **Needs attention only** filter hides everything that is already in sync. Set a
+direction on a tool-set (folder) row to apply it to every tool inside at once,
+then click **Apply Selected**. Nothing touches disk or the server until you
+apply.
 
-### Exporting Tools (FreeCAD → Smooth)
+When a tool changed on both sides, double-click the row to see a field-by-field,
+side-by-side comparison and choose **Keep Local**, **Keep Server**, or **Skip**.
+The server marks each canonical field with the side that changed it.
 
-1. Click **"Sync with Smooth"** button
-2. Select **"Export new tools to Smooth"**
-3. The addon reads your `.fctb` (tool bits) and `.fctl` (library) files
-4. Converts them to Smooth's universal format
-5. Uploads to the server (shape files are referenced by path, not uploaded — see limitations above)
+Right-click a row for management actions: inspect the record, rename, set tool
+type, delete on the server, or link a tool set to a machine.
 
-Your tools are now in the central database.
+### Machines
 
-### Importing Tools (Smooth → FreeCAD)
+The one place tool-table bindings happen. Each machine shows its tool-table
+entries. An unbound entry that the server has a proposal for shows the proposed
+tool inline; **Confirm** binds it, **Reject** dismisses it. You can also bind an
+existing tool into an entry, **Bind new** to mint a new tool from the entry and
+bind it, or **Unbind**. Entries and machines can be deleted here too.
 
-1. Click **"Sync with Smooth"** button
-2. Select **"Import new tools from Smooth"**
-3. The addon downloads tool data from Smooth
-4. Converts back to FreeCAD format
-5. Writes `.fctb` and `.fctl` files
-6. Reloads FreeCAD library
+### Audit log
 
-Your FreeCAD installation now has the latest tools from the central database.
+A read-only view of recent operations recorded by the server: who changed what,
+when, and the result.
 
-### Handling Conflicts
+### Debug
 
-The server uses optimistic locking: if data changed on the server since your last sync,
-your push is rejected rather than silently overwriting it. Re-import to pick up the
-server state, then re-apply your change. A guided resolution dialog is part of the
-planned v2 rework.
+The **Debug** menu (bottom of the window) opens a live API log of the client's
+HTTP traffic. Inspecting a record's raw JSON is a right-click action on any row.
 
----
+## Current limitations (alpha)
 
-## Documentation
+- Custom shape files (`.fcstd` tool geometries) are not themselves transferred —
+  tools reference shapes by name, and only the reference travels. Built-in
+  FreeCAD shapes resolve normally on both ends.
+- Tool holder / assembly data is not modeled or synchronized.
+- After a download, reload the CAM tool library to see the changes in FreeCAD's
+  editors.
 
-- **[Technical Documentation](./TECHNICAL.md)** - Developer guide, file formats, architecture
-- **[Smooth Homepage](https://loobric.com)** - Learn about the complete Smooth ecosystem
-- **[smooth-core](https://github.com/loobric/smooth-core)** - REST API server installation
-- **[smooth-linuxcnc](https://github.com/loobric/smooth-linuxcnc)** - LinuxCNC integration
-- **[Issue Tracker](https://github.com/loobric/smooth-freecad/issues)** - Report bugs or request features
+## Links
 
----
-
-## Contributing
-
-Contributions welcome! This addon is open source (MIT License).
-
-**Ways to contribute:**
-- Report bugs or request features via [Issues](https://github.com/loobric/smooth-freecad/issues)
-- Improve documentation
-- Submit pull requests
-- Test with your tool libraries and report compatibility
-
-See [DEVELOPMENT.md](./DEVELOPMENT.md) for developer documentation.
-
----
+- [TECHNICAL.md](./TECHNICAL.md) — data model and how the FreeCAD formats map to
+  the Smooth schema
+- [DEVELOPMENT.md](./DEVELOPMENT.md) — contributor guide, layout, and tests
+- [smooth-core](https://github.com/loobric/smooth-core) — the Smooth server
+- [smooth-linuxcnc](https://github.com/loobric/smooth-linuxcnc) — LinuxCNC client
+- [Issue tracker](https://github.com/loobric/smooth-freecad/issues)
 
 ## License
 
-MIT License - see [LICENSE](./LICENSE) file
+MIT — see [LICENSE](./LICENSE).
 
----
-
-## Credits
-
-**Smooth** is developed by the Loobric project team.
-
-- **Homepage:** https://loobric.com
-- **GitHub Organization:** https://github.com/loobric
-- **Documentation:** https://loobric.com/docs
-
-**Acknowledgements:**
-- The FreeCAD community, for the CAM workbench
-- The ISO 13399 standard, for tool data modeling
-- All contributors and testers
+Developed by the Loobric project team. Thanks to the FreeCAD community for the
+CAM workbench and to the ISO 13399 standard for tool-data modeling.

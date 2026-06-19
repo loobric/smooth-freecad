@@ -3,22 +3,24 @@
   <name>Smooth</name>
   <description>Synchronize FreeCAD's CAM tool libraries with a Smooth tool data server.
 
-Adds a "Sync with Smooth" button to the CAM workbench toolbar and a
-preference page for server configuration.
+Adds "Smooth" to the CAM workbench toolbar (a modeless Sync / Machines /
+Audit log window) and a preference page for server configuration.
 
-Current capabilities (v2 rework in progress):
-- Export tool bits and libraries to the server, losslessly; re-export
-  updates in place (never duplicates)
-- Exported files carry their server identity; unknown keys (e.g. F&amp;S
-  presets) survive round trips untouched
-- Import (server to FreeCAD) arrives with the next milestone
+Current capabilities (v2):
+- Two-way sync of tool bits and tool libraries: a plan/apply preview shows
+  what changed on each side; upload local edits or download server changes,
+  losslessly and without ever duplicating
+- Synced files carry their server identity; unknown keys (e.g. F&amp;S presets)
+  survive round trips untouched
+- Machines view: browse each machine's tool table and confirm which physical
+  tool is bound to each entry
 
 Requirements:
 - FreeCAD 1.1 or later with the CAM workbench
 - A Smooth server (self-hosted or hosted) - see https://loobric.com
 - Standard library only: no extra Python packages</description>
   <version>0.2.0</version>
-  <date>2026-06-10</date>
+  <date>2026-06-19</date>
   <maintainer email="sliptonic@gmail.com">Brad Collette</maintainer>
   <license file="LICENSE">MIT</license>
   <url type="repository" branch="master">https://github.com/loobric/smooth-freecad</url>
