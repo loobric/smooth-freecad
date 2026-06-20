@@ -3,6 +3,21 @@
 All notable changes to **smooth-freecad** (the FreeCAD CAM client for Smooth) are
 recorded here. This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.1] — 2026-06-20
+
+### Fixed
+- **The addon was not recognized after a manual clone / Addon Manager install**
+  ([#4](https://github.com/loobric/smooth-freecad/issues/4),
+  [#2](https://github.com/loobric/smooth-freecad/issues/2)). The namespace
+  package declaration `freecad/__init__.py` was missing, so FreeCAD never merged
+  `freecad.Smooth` into its `freecad` namespace and `init_gui.py` never ran (no
+  Smooth button, no preferences). Added it, and fixed `init_gui.py` to import its
+  siblings via the package namespace (`from freecad.Smooth import …`) instead of
+  bare `import SmoothCommands`, which only worked in a dev layout.
+- **Manual-install docs** ([#3](https://github.com/loobric/smooth-freecad/issues/3)):
+  added the Windows (`%APPDATA%\FreeCAD\Mod`) and macOS clone paths and a note to
+  clone *into* `Mod` and restart FreeCAD.
+
 ## [0.2.0] — 2026-06-19
 
 The v2 client: a rebuilt UI on the sectioned schema, importing the `loobric`

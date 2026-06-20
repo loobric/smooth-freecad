@@ -33,7 +33,7 @@ addon connects FreeCAD's CAM workbench to that server.
 ## Install
 
 Addon Manager listing is planned but not yet submitted, so install manually by
-cloning into FreeCAD's `Mod` directory:
+cloning into FreeCAD's `Mod` directory, then **restart FreeCAD**:
 
 ```bash
 # Linux
@@ -41,8 +41,25 @@ git clone https://github.com/loobric/smooth-freecad.git \
   ~/.local/share/FreeCAD/Mod/smooth-freecad
 ```
 
-On other platforms, clone into the `Mod` directory shown in FreeCAD at
-**Edit -> Preferences -> General -> (paths)**, then restart FreeCAD.
+```bat
+REM Windows (run in Command Prompt)
+git clone https://github.com/loobric/smooth-freecad.git ^
+  "%APPDATA%\FreeCAD\Mod\smooth-freecad"
+REM %APPDATA% expands to C:\Users\<YourUser>\AppData\Roaming
+```
+
+```bash
+# macOS
+git clone https://github.com/loobric/smooth-freecad.git \
+  ~/Library/Application\ Support/FreeCAD/Mod/smooth-freecad
+```
+
+The exact `Mod` path for your install is shown in FreeCAD at
+**Edit -> Preferences -> General -> (paths)**. Clone *into* `Mod` so the result
+is `Mod/smooth-freecad/package.xml` (not `Mod/package.xml`), then restart
+FreeCAD. After restart you should see a **Smooth** button in the CAM workbench's
+Tool Commands toolbar and a **Smooth** page under Preferences -> CAM. Requires
+FreeCAD 1.1 or later.
 
 ## Configure
 

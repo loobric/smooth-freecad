@@ -23,13 +23,22 @@ def initialize():
         return
     
     App.Console.PrintMessage("Initializing Smooth...\n")
-    
-    # Import and register commands first
-    import SmoothCommands
-    
+
+    # Import siblings via the package namespace — FreeCAD loads this addon as
+    # `freecad.Smooth`, so bare `import SmoothCommands` fails from a normal
+    # install (part of issue #4). Fall back to flat imports only for a dev/legacy
+    # layout where the package dir is on sys.path.
+    try:
+        from freecad.Smooth import SmoothCommands, SmoothPreferences
+    except ImportError:
+        import SmoothCommands
+        import SmoothPreferences
+
+    # Registering commands runs Gui.addCommand (on import of SmoothCommands).
+    _ = SmoothCommands
+
     # Register preference page
     try:
-        import SmoothPreferences
         Gui.addPreferencePage(SmoothPreferences.SmoothPreferencePage, "CAM")
         App.Console.PrintMessage("Smooth preference page registered\n")
     except Exception as e:
