@@ -22,7 +22,7 @@ from pathlib import Path
 import pytest
 
 from freecad.Smooth.mapping import (
-    record_to_instance_sections, instance_to_fctb,
+    record_to_instance_sections, instance_to_fctb, catalog_to_fctb,
     fctl_to_set_sections, set_to_fctl,
     fctb_record_id, fctl_record_id,
     parse_quantity, format_quantity,
@@ -321,6 +321,83 @@ def test_matching_shape_preserves_verbatim_base():
     doc = instance_to_fctb(record)
     assert doc["shape"] == "v-bit.fcstd"
     assert doc["parameter"]["CuttingEdgeAngle"] == "30 °"   # untouched
+
+
+# ---------------------------------------------------------------------------
+# catalog -> .fctb (M2: create-tool-from-catalog)
+# ---------------------------------------------------------------------------
+
+def _catalog_record(record_id="cat-1", name='1/4" Downcut', shape="endmill",
+                    diameter=6.35, flutes=2):
+    """A ToolCatalogRecord the way the server returns it: nominal name/geometry
+    as provenance-tagged Fields."""
+    return {
+        "internal": {"id": record_id, "version": 1},
+        "canonical": {
+            "name": field(name),
+            "manufacturer": field("Acme Tools"),
+            "product_code": field("B201"),
+            "geometry": {"shape": field(shape),
+                         "diameter": field(diameter, unit="mm"),
+                         "flutes": field(flutes)},
+        },
+        "clients": {},
+    }
+
+
+def _instance_from_catalog(record_id="rec-9", catalog_id="cat-1", name=None):
+    """The UNBOUND instance the catalog->instance door mints: the catalog link is
+    canonical, the name copies (or overrides) the catalog's, and measured
+    geometry is EMPTY (the M2 contract — geometry must come from the catalog)."""
+    return {
+        "internal": {"id": record_id, "version": 1},
+        "canonical": {"catalog_type_id": field(catalog_id),
+                      "name": field(name if name is not None else '1/4" Downcut'),
+                      "geometry": {}},
+        "clients": {},
+    }
+
+
+@pytest.mark.unit
+def test_catalog_to_fctb_carries_catalog_geometry_and_stamps_instance_id():
+    """The synthesized .fctb takes its shape + dimensions from the CATALOG's
+    nominal geometry, but its identity (smooth.record_id) from the new INSTANCE
+    — never the catalog id."""
+    catalog = _catalog_record()
+    instance = _instance_from_catalog(record_id="rec-9", catalog_id="cat-1")
+    doc = catalog_to_fctb(catalog, instance)
+    assert doc["shape"] == "endmill.fcstd"
+    assert doc["shape-type"] == "Endmill"
+    assert doc["parameter"]["Diameter"] == "6.35 mm"
+    assert doc["parameter"]["Flutes"] == 2
+    assert doc["name"] == '1/4" Downcut'
+    # the local tool tracks the INSTANCE, not the catalog
+    assert doc["smooth"]["record_id"] == "rec-9"
+
+
+@pytest.mark.unit
+def test_catalog_to_fctb_respects_instance_name_override():
+    """A --name override the instance carries wins over the catalog name; the
+    geometry still comes from the catalog."""
+    catalog = _catalog_record(name="Catalog Name", shape="drill", diameter=5.0)
+    instance = _instance_from_catalog(record_id="rec-2", name="Special lot 7")
+    doc = catalog_to_fctb(catalog, instance)
+    assert doc["name"] == "Special lot 7"
+    assert doc["shape"] == "drill.fcstd"          # geometry still from catalog
+    assert doc["parameter"]["Diameter"] == "5.00 mm"
+    assert doc["smooth"]["record_id"] == "rec-2"
+
+
+@pytest.mark.unit
+def test_catalog_to_fctb_does_not_mutate_inputs():
+    """Pure: neither the catalog nor the instance record is mutated."""
+    catalog = _catalog_record()
+    instance = _instance_from_catalog()
+    import copy as _copy
+    catalog_before = _copy.deepcopy(catalog)
+    instance_before = _copy.deepcopy(instance)
+    catalog_to_fctb(catalog, instance)
+    assert catalog == catalog_before and instance == instance_before
 
 
 # ---------------------------------------------------------------------------

@@ -76,6 +76,47 @@ def test_row_status_info_and_is_exception():
     assert vm.row_status_info("future")["direction"] is None
 
 
+# -- catalog_rows ------------------------------------------------------------
+
+def _catalog(cid, name, manufacturer=None, product_code=None, diameter=None,
+             name_source="asserted:human@web"):
+    canon = {}
+    if name is not None:
+        canon["name"] = {"value": name, "source": name_source}
+    if manufacturer is not None:
+        canon["manufacturer"] = _field(manufacturer, "asserted:human@web")
+    if product_code is not None:
+        canon["product_code"] = _field(product_code, "asserted:human@web")
+    if diameter is not None:
+        canon["geometry"] = {"diameter": {"value": diameter, "unit": "mm",
+                                          "source": "asserted:human@web"}}
+    return {"internal": {"id": cid}, "canonical": canon, "clients": {}}
+
+
+@pytest.mark.unit
+def test_catalog_rows_extracts_fields_and_provenance():
+    [row] = vm.catalog_rows([
+        _catalog("c1", "1/4 Downcut", "Acme", "B201", 6.35)])
+    assert row["id"] == "c1"
+    assert row["name"] == "1/4 Downcut"
+    assert row["manufacturer"] == "Acme"
+    assert row["product_code"] == "B201"
+    assert "6.35" in row["geometry"] and "mm" in row["geometry"]
+    assert row["source"] == "asserted:human@web"      # provenance stays visible
+
+
+@pytest.mark.unit
+def test_catalog_rows_honest_sparse_no_blanks_as_zero():
+    """A sparse record renders missing fields as the marker, never blank, never a
+    fabricated 0 diameter."""
+    [row] = vm.catalog_rows([_catalog("c2", "Mystery")])  # no mfr/code/dia
+    assert row["name"] == "Mystery"
+    assert row["manufacturer"] == vm.MISSING
+    assert row["product_code"] == vm.MISSING
+    assert row["geometry"] == vm.MISSING               # not "0", not blank
+    assert "0" not in row["geometry"]
+
+
 # -- machine_tables ----------------------------------------------------------
 
 def _machine(mid, name, controller):

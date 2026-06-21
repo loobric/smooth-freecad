@@ -37,7 +37,9 @@ class FakeServer:
     def __init__(self):
         self.instances = {}   # id -> sectioned record
         self.sets = {}        # id -> sectioned record
+        self.catalogs = {}    # id -> sectioned ToolCatalogRecord
         self._n = 0
+        self._seed_catalog()
 
     def _next(self, prefix):
         self._n += 1
@@ -48,6 +50,13 @@ class FakeServer:
         return {"internal": {"id": rid, "version": 1,
                              "created_at": "t0", "updated_at": "t0"},
                 "canonical": {}, "clients": {}}
+
+    @staticmethod
+    def _field(value, source="asserted:human@web", unit=None):
+        f = {"value": value, "source": source}
+        if unit is not None:
+            f["unit"] = unit
+        return f
 
     @staticmethod
     def _section(client_version, client_item_id, data):
@@ -91,6 +100,53 @@ class FakeServer:
     def delete_instance(self, record_id):
         self.instances.pop(record_id, None)
         return {"deleted": record_id}
+
+    # -- ToolCatalogRecords (M2: browse + create-instance) --------------------
+
+    def _seed_catalog(self):
+        """One catalog record to browse from: a manufacturer-identified type with
+        nominal name/manufacturer/product_code and a diameter + shape."""
+        cid = self._next("cat")
+        self.catalogs[cid] = {
+            "internal": {"id": cid, "version": 1,
+                         "created_at": "t0", "updated_at": "t0"},
+            "canonical": {
+                "name": self._field('1/4" Downcut'),
+                "manufacturer": self._field("Acme Tools"),
+                "product_code": self._field("B201"),
+                "geometry": {
+                    "shape": self._field("endmill"),
+                    "diameter": self._field(6.35, unit="mm"),
+                    "flutes": self._field(2),
+                },
+            },
+            "clients": {},
+        }
+
+    def list_catalog_records(self):
+        return list(self.catalogs.values())
+
+    def get_catalog_record(self, record_id):
+        return self.catalogs[record_id]
+
+    def create_instance_from_catalog(self, catalog_id, name=None):
+        """Mint an UNBOUND instance from a catalog type. The catalog link is
+        stamped canonical (asserted), the name copies the catalog's (or the
+        override), and measured ``geometry`` is left EMPTY — the M2 contract: a
+        just-created physical tool has not been measured, so its usable nominal
+        geometry has to come from the catalog record, not the instance."""
+        catalog = self.catalogs[catalog_id]
+        rid = self._next("rec")
+        rec = self._blank(rid)
+        cat_name = (catalog["canonical"].get("name") or {}).get("value")
+        _set_path(rec["canonical"], "catalog_type_id",
+                  {"value": catalog_id, "source": "asserted:human@freecad"})
+        _set_path(rec["canonical"], "name",
+                  {"value": name if name is not None else cat_name,
+                   "source": "asserted:human@freecad"})
+        rec["canonical"]["geometry"] = {}        # measured geometry unknown
+        self.instances[rid] = rec
+        return rec
 
     # -- ToolSets -------------------------------------------------------------
 

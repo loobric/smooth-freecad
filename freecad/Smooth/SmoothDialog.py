@@ -114,8 +114,10 @@ class SmoothWindow(QtGui.QDialog):
         tools_dir = str(get_tools_dir())
         # The one CAM surface; binding lives on Machines; Audit is read-only.
         self.sync_tab = SmoothTabs.SyncTab(self, self.client, tools_dir)
+        self.catalog_tab = SmoothTabs.CatalogTab(self, self.client, tools_dir)
         self._tab_list = [
             self.sync_tab,
+            self.catalog_tab,
             SmoothTabs.MachinesTab(self, self.client),
             SmoothTabs.AuditTab(self, self.client),
         ]

@@ -1024,3 +1024,125 @@ class AuditTab(_Tab):
     def selected_record(self):
         rows = self.tree.selectedItems()
         return rows[0].data(0, QtCore.Qt.UserRole) if rows else None
+
+
+# ---------------------------------------------------------------------------
+# Catalog tab (read-only browse + create-tool-from-catalog)
+# ---------------------------------------------------------------------------
+
+class CatalogTab(_Tab):
+    """Browse the catalog records (ToolCatalogRecords) and create a tool from a
+    selected one. Read-only browse: no catalog authoring/editing here. 'Create
+    tool from catalog' makes an UNBOUND server instance from the catalog type and
+    immediately materializes a local .fctb pre-filled from the catalog's nominal
+    geometry, linked to the new instance (the orchestration lives in
+    ``sync.create_tool_from_catalog``; this class only renders and fires it)."""
+
+    TITLE = "Catalog"
+    HEADERS = ["Name", "Manufacturer", "Product code", "Geometry", "Source"]
+
+    def __init__(self, window, client, tools_dir):
+        super().__init__(window, client)
+        self.tools_dir = tools_dir
+        self._records_by_id = {}
+        layout = QtGui.QVBoxLayout(self)
+        hint = QtGui.QLabel(
+            "Browse catalog records; select one and 'Create tool from catalog' to "
+            "make an unbound tool in this library, pre-filled from the catalog's "
+            "nominal geometry and linked to the new record.")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        self.tree = QtGui.QTreeWidget()
+        self.tree.setHeaderLabels(self.HEADERS)
+        self.tree.setRootIsDecorated(False)
+        self.tree.setColumnWidth(0, 220)
+        self.tree.setColumnWidth(1, 140)
+        self.tree.setColumnWidth(2, 120)
+        self.tree.setColumnWidth(3, 110)
+        self.tree.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self._context_menu)
+        self.tree.itemSelectionChanged.connect(self._selection_changed)
+        self.tree.itemDoubleClicked.connect(lambda *a: self._create_selected())
+        layout.addWidget(self.tree)
+
+        row = QtGui.QHBoxLayout()
+        row.addStretch()
+        self.create_button = QtGui.QPushButton("Create tool from catalog")
+        self.create_button.setToolTip(
+            "Create an unbound tool from the selected catalog record and write a "
+            "local tool file pre-filled from its nominal geometry.")
+        self.create_button.clicked.connect(self._create_selected)
+        row.addWidget(self.create_button)
+        layout.addLayout(row)
+        self._selection_changed()
+
+    def _tools_dir(self):
+        return self.tools_dir
+
+    def refresh(self):
+        self.tree.clear()
+        try:
+            records = self.client.list_catalogs()
+        except SmoothError as e:
+            self.window.refresh_api_log()
+            self._notify("✗ %s" % e)
+            return
+        self.window.refresh_api_log()
+        self._records_by_id = {
+            (r.get("internal") or {}).get("id"): r for r in records}
+        rows = viewmodel.catalog_rows(records)
+        if not rows:
+            QtGui.QTreeWidgetItem(self.tree, ["(no catalog records)", "", "", "", ""])
+            self._selection_changed()
+            return
+        for r in rows:
+            item = QtGui.QTreeWidgetItem([
+                r["name"], r["manufacturer"], r["product_code"],
+                r["geometry"], r["source"]])
+            item.setData(0, QtCore.Qt.UserRole, r["id"])
+            self.tree.addTopLevelItem(item)
+        self._selection_changed()
+
+    def selected_record(self):
+        rows = self.tree.selectedItems()
+        if not rows:
+            return None
+        rid = rows[0].data(0, QtCore.Qt.UserRole)
+        return self._records_by_id.get(rid) if rid else None
+
+    def _selection_changed(self):
+        self.create_button.setEnabled(self.selected_record() is not None)
+
+    def _context_menu(self, point):
+        at = self.tree.itemAt(point)
+        if at is not None:
+            self.tree.setCurrentItem(at)
+        if self.selected_record() is None:
+            return
+        menu = QtGui.QMenu(self)
+        inspect = menu.addAction("Inspect record (JSON)…")
+        create = menu.addAction("Create tool from catalog")
+        chosen = menu.exec_(self.tree.viewport().mapToGlobal(point))
+        if chosen == inspect:
+            self.window.inspect_selected()
+        elif chosen == create:
+            self._create_selected()
+
+    def _create_selected(self):
+        record = self.selected_record()
+        if record is None:
+            return
+        try:
+            result = sync.create_tool_from_catalog(
+                self._tools_dir(), self.client, record, name=None,
+                log=lambda m: App.Console.PrintMessage("Smooth: %s\n" % m))
+        except SmoothError as e:
+            self.window.refresh_api_log()
+            QtGui.QMessageBox.warning(self, "Smooth", str(e))
+            self._notify("✗ %s" % e)
+            return
+        self.window.refresh_api_log()
+        self._notify("Created '%s' from catalog (unbound). Reload the CAM tool "
+                     "library to see it in the editor." % result["basename"])
+        self.refresh()
