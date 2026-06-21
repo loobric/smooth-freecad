@@ -3,6 +3,28 @@
 All notable changes to **smooth-freecad** (the FreeCAD CAM client for Smooth) are
 recorded here. This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] — 2026-06-21
+
+The **M2** client: browse the server's catalog records and create tools from
+them. Tracks smooth-core 0.2.0.
+
+### Added
+- **Catalog tab** — browse `ToolCatalogRecord`s (name, manufacturer, product
+  code, geometry, provenance source); read-only, no authoring.
+- **Create tool from catalog** — makes an **unbound** server instance from the
+  catalog type and immediately materializes a local `.fctb` in the active tools
+  library, pre-filled from the catalog's nominal geometry and linked to the new
+  instance. It lands **synced** (FreeCAD's client section is written back as the
+  sync base); the instance's canonical geometry stays empty by design (the
+  nominal geometry is reachable through the catalog link). Reload the CAM tool
+  library to see the new tool in the editor.
+
+### Changed
+- **Re-vendored `loobric.py`** from smooth-core 0.2.0 (the M2 reference client):
+  `create_instance_from_catalog`, `add_to_set` / `remove_from_set`,
+  `show-tool-set`, `server_version`. Backwards-compatible — every existing call
+  site is unchanged.
+
 ## [0.2.1] — 2026-06-20
 
 ### Fixed

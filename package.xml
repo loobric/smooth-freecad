@@ -19,7 +19,7 @@ Requirements:
 - FreeCAD 1.1 or later with the CAM workbench
 - A Smooth server (self-hosted or hosted) - see https://loobric.com
 - Standard library only: no extra Python packages</description>
-  <version>0.2.1</version>
+  <version>0.3.0</version>
   <date>2026-06-20</date>
   <maintainer email="sliptonic@gmail.com">Brad Collette</maintainer>
   <license file="LICENSE">MIT</license>
