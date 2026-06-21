@@ -559,6 +559,63 @@ def plan_sync(tools_dir, client, log=lambda msg: None):
     return {"items": items, "errors": errors}
 
 
+def create_tool_from_catalog(tools_dir, client, catalog_record, name=None,
+                             log=lambda msg: None):
+    """Create a tool from a catalog record (the M2 catalog->instance flow).
+
+    Two effects, in order:
+
+    1. create an UNBOUND server instance from the catalog type
+       (``create_instance_from_catalog`` — a catalog is not a machine position,
+       so nothing is bound);
+    2. immediately materialize a local ``.fctb`` in ``<tools_dir>/Bit/``,
+       pre-filled from the CATALOG's nominal geometry and linked to the new
+       instance (the instance's own measured geometry is empty by M2 design —
+       see :func:`mapping.catalog_to_fctb`).
+
+    Follows the ``pull_bit`` materialize pattern (same path/dedup/state-journal
+    helpers): the filename stem comes from the instance's ``client_item_id`` (or
+    a slug of the instance/catalog name), an existing file is disambiguated with
+    the record's short id, and the sync journal learns ``records[rid] = basename``
+    so the next sync UPDATES this record rather than re-creating it.
+
+    Returns ``{"path", "instance", "basename"}``.
+    """
+    catalog_id = _record_id(catalog_record)
+    inst = client.create_instance_from_catalog(catalog_id, name=name)
+    rid = _record_id(inst)
+    doc = mapping.catalog_to_fctb(catalog_record, inst)
+
+    bit_dir = os.path.join(tools_dir, "Bit")
+    os.makedirs(bit_dir, exist_ok=True)
+    cii = _client_item_id(inst) or ""
+    stem = cii.rsplit(".fctb", 1)[0] or _slug(
+        _record_name(inst) or _record_name(catalog_record) or "tool")
+    path = os.path.join(bit_dir, stem + ".fctb")
+    if os.path.exists(path):
+        path = os.path.join(bit_dir, "%s_%s.fctb" % (stem, rid[:8]))
+    _write_json(path, doc)
+    basename = os.path.basename(path)
+
+    # Write FreeCAD's client section (the lossless .fctb) back to the instance,
+    # establishing the sync base so this freshly-created tool lands SYNCED rather
+    # than as a no-base "conflict" on the next plan. Only the section is written —
+    # NOT the geometry asserts: the instance's canonical geometry stays
+    # deliberately empty (the nominal geometry is reachable through the catalog
+    # link), exactly as the server's create-from-catalog leaves it.
+    sections = mapping.record_to_instance_sections(doc, client_item_id=basename)
+    client.put_instance_section(rid, sections.data, sections.client_item_id)
+
+    state = _load_sync_state(tools_dir)
+    state["records"][rid] = basename
+    _save_sync_state(tools_dir, state)
+
+    log("CREATE from catalog '%s' -> %s [%s] (record %s, unbound, synced)"
+        % (_record_name(catalog_record) or "?", basename,
+           doc.get("shape-type", "?"), rid[:8]))
+    return {"path": path, "instance": inst, "basename": basename}
+
+
 class SyncApplyError(Exception):
     """Apply-time failure for one item (others proceed)."""
 

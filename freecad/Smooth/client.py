@@ -37,7 +37,7 @@ NotFound = loobric.NotFound
 # This client's identity (the `clients` map key) and software version, stamped on
 # every section write; and the actor on human-initiated operator-lane acts.
 CLIENT_NAME = mapping.CLIENT_NAME        # "freecad"
-CLIENT_VERSION = "0.2.1"
+CLIENT_VERSION = "0.3.0"
 HUMAN_ACTOR = "human@freecad"
 
 # Public resource tokens for the generic canonical doors (assert / section sync).
@@ -124,6 +124,20 @@ class SmoothApi(loobric.Client):
 
     def delete_instance(self, record_id):
         return self.delete_tool_record(record_id)
+
+    # -- ToolCatalogRecords (browse + create-from) — M2 --------------------
+
+    def list_catalogs(self):
+        """The catalog records available to browse (ToolCatalogRecords)."""
+        return self.list_catalog_records()
+
+    def get_catalog(self, record_id):
+        return self.get_catalog_record(record_id)
+
+    def create_from_catalog(self, catalog_id, name=None):
+        """Create a new UNBOUND instance from a catalog type (the catalog->
+        instance door). ``name`` overrides the copied catalog name when given."""
+        return self.create_instance_from_catalog(catalog_id, name=name)
 
     # -- ToolSets (one per .fctl) — sync lane -------------------------------
 

@@ -69,6 +69,59 @@ def fmt_dia(value):
     return "%.3g mm" % value if isinstance(value, (int, float)) else "—"
 
 
+# The honest-sparse marker: a field we don't have renders as this, never as a
+# blank cell or a fabricated zero (the provenance discipline, made visible).
+MISSING = "—"
+
+
+# ---------------------------------------------------------------------------
+# Catalog tab — the browse table (one row per ToolCatalogRecord)
+# ---------------------------------------------------------------------------
+
+def _catalog_text(field):
+    """Display a catalog Field's value, or the honest-sparse marker when it is
+    absent — never a blank, never a coerced 0."""
+    value = field_value(field)
+    return MISSING if value in (None, "") else str(value)
+
+
+def _catalog_geometry(record):
+    """A short geometry summary for a catalog row: the nominal diameter (with
+    unit when present), else the shape, else the honest-sparse marker."""
+    dia = canonical(record, "geometry", "diameter")
+    value = field_value(dia)
+    if value is not None:
+        unit = dia.get("unit") if isinstance(dia, dict) else None
+        return "⌀%s%s" % (value, unit or "")
+    shape = field_value(canonical(record, "geometry", "shape"))
+    return str(shape) if shape else MISSING
+
+
+def catalog_rows(catalog_records):
+    """Render model for the Catalog browse table — one row per catalog record.
+
+    Each row is ``{id, name, manufacturer, product_code, geometry, source}``:
+    ``geometry`` is the nominal-diameter summary and ``source`` is the provenance
+    of the name (falling back to the diameter's), so where a catalog's facts came
+    from stays visible — mirroring the web. Honest-sparse: a missing field is the
+    :data:`MISSING` marker, never a blank or a fabricated zero. Pure: the widget
+    only renders this."""
+    rows = []
+    for record in catalog_records or []:
+        name_field = canonical(record, "name")
+        dia_field = canonical(record, "geometry", "diameter")
+        rows.append({
+            "id": (record.get("internal") or {}).get("id"),
+            "name": _catalog_text(name_field),
+            "manufacturer": _catalog_text(canonical(record, "manufacturer")),
+            "product_code": _catalog_text(canonical(record, "product_code")),
+            "geometry": _catalog_geometry(record),
+            "source": field_source(name_field) or field_source(dia_field)
+                      or MISSING,
+        })
+    return rows
+
+
 # ---------------------------------------------------------------------------
 # Status model: Existence × Sync, kept deliberately separate
 # ---------------------------------------------------------------------------

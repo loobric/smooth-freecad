@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# PYTHON_ARGCOMPLETE_OK
 # MIT License
 # Copyright (c) 2025 sliptonic
 # SPDX-License-Identifier: MIT
@@ -320,6 +321,39 @@ class Client:
         return self._call("POST", f"/tool-set-records/{set_id}/members",
                           body={"members": members, "actor": actor})
 
+    def _member_payload(self, set_id: str) -> List[Dict[str, Any]]:
+        """Current membership as the `{tool_record_id, number}` payload the
+        members door expects (number is the bare int, or None for unknown)."""
+        rec = self.get_tool_set(set_id)
+        out = []
+        for m in (rec.get("canonical") or {}).get("members") or []:
+            num = m.get("number")
+            out.append({"tool_record_id": m["tool_record_id"],
+                        "number": num.get("value") if isinstance(num, dict) else num})
+        return out
+
+    def add_to_set(self, set_id: str, tool_record_ids: List[str],
+                   actor: str = "human@cli") -> Dict[str, Any]:
+        """Add tool record(s) to a set, keeping existing members and their
+        numbers. Tools already in the set are skipped — membership is a set, not
+        a bag. Read-modify-write over the replace-only members door."""
+        members = self._member_payload(set_id)
+        have = {m["tool_record_id"] for m in members}
+        for tid in tool_record_ids:
+            if tid not in have:
+                members.append({"tool_record_id": tid, "number": None})
+                have.add(tid)
+        return self.set_members(set_id, members, actor)
+
+    def remove_from_set(self, set_id: str, tool_record_ids: List[str],
+                        actor: str = "human@cli") -> Dict[str, Any]:
+        """Remove tool record(s) from a set, keeping the rest. Read-modify-write
+        over the replace-only members door."""
+        drop = set(tool_record_ids)
+        members = [m for m in self._member_payload(set_id)
+                   if m["tool_record_id"] not in drop]
+        return self.set_members(set_id, members, actor)
+
     # -- machines ------------------------------------------------------------
     def list_machines(self) -> List[Dict[str, Any]]:
         return self._call("GET", "/machine-records").get("items", [])
@@ -449,6 +483,12 @@ class Client:
     def whoami(self) -> Dict[str, Any]:
         return self._call("GET", "/auth/me")
 
+    def server_version(self) -> Dict[str, Any]:
+        """The server's build identity ({version, commit}). Unauthenticated, so
+        it works before login; a NotFound means the server predates the endpoint
+        (an older build)."""
+        return self._call("GET", "/version", require_auth=False)
+
     def change_password(self, current_password: str, new_password: str) -> Dict[str, Any]:
         return self._call("POST", "/auth/change-password",
                           body={"current_password": current_password,
@@ -481,8 +521,37 @@ class Client:
     def get_catalog_record(self, record_id: str) -> Dict[str, Any]:
         return self._call("GET", f"/tool-catalog-records/{record_id}")
 
-    def create_catalog_record(self, **section) -> Dict[str, Any]:
-        return self._call("POST", "/tool-catalog-records", body=dict(section))
+    def create_catalog_record(self, source: str,
+                              fields: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Seeded, atomic catalog-record create. `source` is the declared actor —
+        the server stamps `asserted:<source>` on every field; the client never
+        writes provenance. `fields` carries the nominal {value, unit} leaves
+        (name/manufacturer/product_code + optional geometry/item_type)."""
+        return self._call("POST", "/tool-catalog-records",
+                          body={"actor": source, **(fields or {})})
+
+    def create_instance_from_catalog(self, catalog_id: str,
+                                     name: Optional[str] = None,
+                                     qa: Optional[Dict[str, Any]] = None,
+                                     cert: Optional[str] = None) -> Dict[str, Any]:
+        """Create a new physical instance from a catalog type via the catalog->
+        instance door. The server stamps the catalog_type_id link as
+        asserted:<requester> and leaves the instance UNBOUND (a catalog is not a
+        machine position). `name` overrides the copied catalog name when given.
+
+        Optional manufacturer QA: `qa` is a geometry-shaped {value, unit} map and
+        `cert` its certificate/serial; the server stamps each measured field
+        observed:manufacturer@<serial> (the client never sends a raw source)."""
+        body: Dict[str, Any] = {}
+        if name is not None:
+            body["name"] = name
+        if qa is not None:
+            body["qa"] = qa
+        if cert is not None:
+            body["cert"] = cert
+        return self._call("POST",
+                          f"/tool-catalog-records/{catalog_id}/create-instance",
+                          body=body)
 
     def create_entry(self, machine_id: str, **section) -> Dict[str, Any]:
         return self._call("POST", "/tool-table-entry-records",
@@ -740,6 +809,65 @@ def list_tool_sets():
         print("=" * 80)
 
 
+def show_tool_set(set_handle):
+    """Show one tool set and its members: each member's number (with the source
+    that vouches for it), the tool it points at, and that tool's geometry."""
+    s = _resolve_tool_set(set_handle)
+    members = (s.get("canonical") or {}).get("members") or []
+    print(f"\nTool Set {_rid(s)}")
+    print("=" * 78)
+    print(f"  Name: {_cval(s, 'name') or '(unnamed)'}")
+    machine = _cval(s, "machine_id")
+    if machine:
+        mname = {_rid(m): _cval(m, "name") for m in _client().list_machines()}.get(machine)
+        print(f"  Machine: {mname or str(machine)[:8]} (member numbers inherited)")
+    else:
+        print("  Machine: not linked")
+    print(f"  Members: {len(members)}")
+    if not members:
+        print("  (none yet — add tools with 'loobric add-to-set')")
+        print("=" * 78)
+        return
+    tools = {_rid(t): t for t in _client().list_tool_records()}
+
+    def _num(m):
+        v = (m.get("number") or {}).get("value")
+        return v if v is not None else float("inf")
+
+    for m in sorted(members, key=_num):
+        tid = m.get("tool_record_id")
+        num = m.get("number") or {}
+        t = tools.get(tid)
+        tname = (_cval(t, "name") if t else None) or (str(tid)[:8] if tid else "?")
+        ndisp = f"T{num['value']}" if num.get("value") is not None else "(no #)"
+        dia = _cval(t, "geometry", "diameter") if t else None
+        extra = f"  ⌀{dia}" if dia is not None else ""
+        print(f"  {ndisp:>6}  {tname}{extra}  [{num.get('source', 'unknown')}]")
+    print("=" * 78)
+
+
+def add_to_set(set_handle, tools):
+    """Add one or more tools to a tool set (existing members are kept)."""
+    s = _resolve_tool_set(set_handle)
+    recs = [_resolve_record(t) for t in tools]
+    updated = _client().add_to_set(_rid(s), [_rid(r) for r in recs])
+    n = len((updated.get("canonical") or {}).get("members") or [])
+    label = _cval(s, "name") or str(_rid(s))[:8]
+    names = ", ".join(_cval(r, "name") or str(_rid(r))[:8] for r in recs)
+    print(f"✓ Added {len(recs)} tool(s) to '{label}' — {names}. Now {n} member(s).")
+
+
+def remove_from_set(set_handle, tools):
+    """Remove one or more tools from a tool set (the rest are kept)."""
+    s = _resolve_tool_set(set_handle)
+    recs = [_resolve_record(t) for t in tools]
+    updated = _client().remove_from_set(_rid(s), [_rid(r) for r in recs])
+    n = len((updated.get("canonical") or {}).get("members") or [])
+    label = _cval(s, "name") or str(_rid(s))[:8]
+    names = ", ".join(_cval(r, "name") or str(_rid(r))[:8] for r in recs)
+    print(f"✓ Removed {len(recs)} tool(s) from '{label}' — {names}. Now {n} member(s).")
+
+
 def list_pending():
     """List inbox items awaiting review (binding proposals).
 
@@ -886,6 +1014,43 @@ def _resolve_record(prefix: str) -> Dict[str, Any]:
 
 def _resolve_tool_set(prefix: str) -> Dict[str, Any]:
     return _match_id(_client().list_tool_sets(), prefix, "tool set")
+
+
+def _resolve_catalog(handle: str) -> Dict[str, Any]:
+    """Resolve a catalog record by id / unique id-prefix / name / product_code
+    (same shape as the other resolvers; on ambiguity it prints the candidates).
+    A catalog record carries a manufacturer product_code, so humans reach for it
+    as readily as the id or name — all three are first-class handles here."""
+    items = _client().list_catalog_records()
+    # An exact id, name, or product_code wins outright.
+    for keyfn in (lambda r: _rid(r),
+                  lambda r: _cval(r, "name"),
+                  lambda r: _cval(r, "product_code")):
+        exact = [r for r in items if keyfn(r) == handle]
+        if len(exact) == 1:
+            return exact[0]
+        if len(exact) > 1:
+            _ambiguous_catalog(handle, exact)
+    # Otherwise a unique prefix on the id, the name, or the product_code.
+    matches = [r for r in items
+               if str(_rid(r) or "").startswith(handle)
+               or str(_cval(r, "name") or "").startswith(handle)
+               or str(_cval(r, "product_code") or "").startswith(handle)]
+    if not matches:
+        print(f"Error: no catalog record matches '{handle}'", file=sys.stderr)
+        sys.exit(1)
+    if len(matches) > 1:
+        _ambiguous_catalog(handle, matches)
+    return matches[0]
+
+
+def _ambiguous_catalog(handle: str, candidates: List[Dict[str, Any]]) -> None:
+    print(f"Error: '{handle}' is ambiguous ({len(candidates)} catalog records):",
+          file=sys.stderr)
+    for c in candidates:
+        print(f"  {str(_rid(c))[:8]}  {_cval(c, 'name') or ''}  "
+              f"{_cval(c, 'product_code') or ''}".rstrip(), file=sys.stderr)
+    sys.exit(1)
 
 
 def _resolve_entry(machine: Dict[str, Any], tool_number: int) -> Dict[str, Any]:
@@ -1046,6 +1211,32 @@ def unbind_entry(machine_id: str, tool_number: int):
     print(f"✓ Unbound T{tool_number} @ {m_name}. The entry keeps its data.")
 
 
+def create_record(args):
+    """Context-aware create-record: from a machine entry (-> BOUND instance) or
+    from a catalog record (-> UNBOUND instance). The two paths are mutually
+    exclusive; the outcome message names which one ran."""
+    qa_path = getattr(args, "qa", None)
+    cert = getattr(args, "cert", None)
+    if getattr(args, "from_catalog", None):
+        if args.machine or args.tool_number is not None:
+            print("Error: --from-catalog cannot be combined with MACHINE/TOOL_NUMBER",
+                  file=sys.stderr)
+            sys.exit(1)
+        create_record_from_catalog(args.from_catalog, args.name,
+                                   qa_path=qa_path, cert=cert)
+    else:
+        if qa_path or cert:
+            print("Error: --qa/--cert are only valid with --from-catalog "
+                  "(manufacturer QA is recorded when creating from a catalog record)",
+                  file=sys.stderr)
+            sys.exit(1)
+        if not args.machine or args.tool_number is None:
+            print("Error: create-record needs MACHINE TOOL_NUMBER (entry form) "
+                  "or --from-catalog CATALOG", file=sys.stderr)
+            sys.exit(1)
+        create_record_from_entry(args.machine, args.tool_number, args.name)
+
+
 def create_record_from_entry(machine_id: str, tool_number: int, name: str = None):
     """Mint a new instance record from a entry's observations and bind it, in one
     step. The bind endpoint mints a new instance when no instance_id is given."""
@@ -1057,6 +1248,47 @@ def create_record_from_entry(machine_id: str, tool_number: int, name: str = None
     rec_id = str(bound or "")[:8]
     print(f"✓ Created a record from T{tool_number} @ {m_name} and bound it "
           f"(record {rec_id}).")
+
+
+def create_record_from_catalog(catalog_handle: str, name: str = None,
+                               qa_path: str = None, cert: str = None):
+    """Create a new UNBOUND instance from a catalog record (the catalog->instance
+    door). The server stamps the catalog_type_id link as asserted:<requester>;
+    the instance is left unbound (it sits in no machine entry). The name defaults
+    to the catalog record's name unless --name overrides it.
+
+    Optional manufacturer QA: --qa is a geometry-shaped JSON file ({diameter:
+    {value, unit}, ...}) and --cert its certificate/serial. --cert is required
+    iff --qa is given; the server stamps each measured field
+    observed:manufacturer@<serial>."""
+    if qa_path and not cert:
+        print("Error: --qa requires --cert (the certificate/serial the QA "
+              "measurements are recorded against)", file=sys.stderr)
+        sys.exit(1)
+    if cert and not qa_path:
+        print("Error: --cert requires --qa (a certificate needs QA measurements "
+              "to certify)", file=sys.stderr)
+        sys.exit(1)
+    qa = None
+    if qa_path:
+        with open(qa_path) as f:
+            text = f.read().strip()
+        try:
+            qa = json.loads(text) if text else {}
+        except json.JSONDecodeError as e:
+            print(f"Error: invalid JSON in --qa file: {e}", file=sys.stderr)
+            sys.exit(1)
+        if not isinstance(qa, dict):
+            print("Error: --qa JSON must be a geometry-shaped object", file=sys.stderr)
+            sys.exit(1)
+    catalog = _resolve_catalog(catalog_handle)
+    cat_name = _cval(catalog, "name")
+    rec = _client().create_instance_from_catalog(_rid(catalog), name=name,
+                                                 qa=qa, cert=cert)
+    inst_id = str(_rid(rec) or "")[:8]
+    qa_note = f" with manufacturer QA ({cert})" if qa else ""
+    print(f"✓ Created instance {inst_id} from {cat_name}{qa_note} — unbound "
+          f"(no machine entry yet).")
 
 
 def create_machine(name, controller=None):
@@ -1071,6 +1303,117 @@ def create_set(name):
     """Create a tool set and assert its name."""
     rec = _client().create_tool_set(name=name)
     print(f"✓ Created tool set '{name}' ({str(_rid(rec))[:8]}).")
+
+
+def _load_catalog_fields(file=None) -> Dict[str, Any]:
+    """Read the nominal-fields JSON for a catalog record: from --file, else from
+    stdin (the '-' convention). An empty/absent stream is an empty object — the
+    convenience flags may supply every field by hand. The JSON carries values +
+    units; provenance is never in it (the server stamps it from --source)."""
+    if file:
+        with open(file) as f:
+            text = f.read()
+    elif not sys.stdin.isatty():
+        text = sys.stdin.read()
+    else:
+        text = ""
+    text = text.strip()
+    if not text:
+        return {}
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as e:
+        print(f"Error: invalid JSON for catalog record: {e}", file=sys.stderr)
+        sys.exit(1)
+    if not isinstance(data, dict):
+        print("Error: catalog record JSON must be an object", file=sys.stderr)
+        sys.exit(1)
+    return data
+
+
+def _flag_field(fields: Dict[str, Any], key: str, value: Any) -> None:
+    """A convenience flag supplies/overrides a top-level nominal field's value,
+    keeping any unit already present in the JSON."""
+    if value is None:
+        return
+    leaf = fields.get(key)
+    if isinstance(leaf, dict):
+        leaf["value"] = value
+    else:
+        fields[key] = {"value": value}
+
+
+def create_catalog_record(source, file=None, name=None, manufacturer=None,
+                          product_code=None, diameter=None, flutes=None):
+    """Create a catalog record (a ToolCatalogRecord) in one atomic, audited call.
+
+    Nominal fields arrive as JSON on stdin (the '-' convention) or via --file,
+    with thin convenience flags (--name/--manufacturer/--product-code/--diameter/
+    --flutes) for the by-hand case. --source is the declared actor; the server
+    stamps `asserted:<source>` on every field — the client never writes
+    provenance. name, manufacturer and product_code are required (the identity
+    floor)."""
+    fields = _load_catalog_fields(file)
+    _flag_field(fields, "name", name)
+    _flag_field(fields, "manufacturer", manufacturer)
+    _flag_field(fields, "product_code", product_code)
+    if diameter is not None:
+        fields.setdefault("geometry", {})["diameter"] = {"value": diameter, "unit": "mm"}
+    if flutes is not None:
+        fields.setdefault("geometry", {})["flutes"] = {"value": flutes}
+    rec = _client().create_catalog_record(source=source, fields=fields)
+    print(f"✓ Created catalog record '{_cval(rec, 'name')}' "
+          f"({str(_rid(rec))[:8]}). Every field carries source "
+          f"'asserted:{source}'.")
+
+
+def list_catalog_records():
+    """List the user's catalog records (ToolCatalogRecords)."""
+    items = _client().list_catalog_records()
+    if not items:
+        print("No catalog records found.")
+        return
+    print(f"\nCatalog Records ({len(items)}):")
+    print("=" * 78)
+    for c in items:
+        print(f"  ID: {_rid(c)}")
+        print(f"  Name: {_cval(c, 'name')}")
+        ident = "  ".join(p for p in (_cval(c, "manufacturer"),
+                                      _cval(c, "product_code")) if p)
+        if ident:
+            print(f"  {ident}")
+        dia = _cfield(c, "geometry", "diameter")
+        if dia.get("value") is not None:
+            print(f"  Geometry: ⌀{dia['value']}{dia.get('unit', '')}")
+        print("=" * 78)
+
+
+def _print_field(label, leaf, indent="  "):
+    """Show one canonical field with its provenance — value, optional unit, and
+    the source it came from (the whole point: fabrication stays visible)."""
+    value = leaf.get("value")
+    unit = leaf.get("unit")
+    disp = "—" if value is None else (f"{value} {unit}" if unit else f"{value}")
+    print(f"{indent}{label}: {disp}  [{leaf.get('source', '')}]")
+
+
+def show_catalog_record(catalog):
+    """Show one catalog record with full provenance — every field with its source."""
+    rec = _resolve_catalog(catalog)
+    canonical = rec.get("canonical") or {}
+    print(f"\nCatalog Record {_rid(rec)}")
+    print("=" * 78)
+    for key in ("name", "manufacturer", "product_code", "item_type"):
+        leaf = canonical.get(key)
+        if isinstance(leaf, dict) and "source" in leaf:
+            _print_field(key, leaf)
+    geometry = canonical.get("geometry") or {}
+    present = {k: v for k, v in geometry.items() if isinstance(v, dict)}
+    if present:
+        print("  geometry:")
+        for gkey, leaf in present.items():
+            _print_field(gkey, leaf, indent="    ")
+    print("=" * 78)
 
 
 def _parse_entry(spec):
@@ -1128,13 +1471,24 @@ def reset_account(assume_yes=False):
 
 
 def whoami():
-    """Show the authenticated account."""
-    me = _client().whoami()
-    print(f"  Email: {me.get('email')}")
-    print(f"  Role:  {me.get('role')}")
-    print(f"  Admin: {me.get('is_admin')}")
+    """Show which server we're talking to, the authenticated account, and the
+    server's build identity (the fastest 'is this the server/code I expect?'
+    check)."""
+    client = _client()
+    print(f"  Server: {client.base_url or '(none set)'}")
+    me = client.whoami()
+    print(f"  Email:  {me.get('email')}")
+    print(f"  Role:   {me.get('role')}")
+    print(f"  Admin:  {me.get('is_admin')}")
     if me.get("id"):
-        print(f"  ID:    {me.get('id')}")
+        print(f"  ID:     {me.get('id')}")
+    # Server build identity — an older server has no /version endpoint, which is
+    # itself the answer to "is it running my code?"
+    try:
+        v = client.server_version()
+        print(f"  Build:  {v.get('version', '?')} ({v.get('commit', '?')})")
+    except NotFound:
+        print("  Build:  unknown — older server with no /version endpoint")
 
 
 def list_audit(limit=50):
@@ -1271,6 +1625,12 @@ def main():
   loobric bind millstone 7 <record>     # or bind an existing record
   loobric unbind millstone 7
 
+  # Catalog records -> a physical instance (unbound: not in any machine yet)
+  loobric create-record --from-catalog B201            # by product code
+  loobric create-record --from-catalog B201 --name "1/4 downcut, lot 7"
+  loobric create-record --from-catalog B201 \\
+    --qa qa.json --cert "kennametal@SN12345"           # + manufacturer QA
+
   # Inspect
   loobric list-machines
   loobric list-tools
@@ -1389,6 +1749,17 @@ Environment Variables:
     )
     list_tool_sets_parser.set_defaults(func=lambda args: list_tool_sets())
 
+    # === show-tool-set ===
+    show_tool_set_parser = subparsers.add_parser(
+        "show-tool-set",
+        help="Show one tool set and its members",
+        description="Show a tool set's members — each member's number (with the "
+                    "source that vouches for it), the tool, and its geometry. SET "
+                    "resolves by id, name, or unique prefix.",
+    )
+    show_tool_set_parser.add_argument("set", help="Tool set id, name, or unique prefix")
+    show_tool_set_parser.set_defaults(func=lambda args: show_tool_set(args.set))
+
     # === link-machine ===
     link_parser = subparsers.add_parser(
         "link-machine",
@@ -1485,16 +1856,40 @@ Environment Variables:
 
     create_record_parser = subparsers.add_parser(
         "create-record",
-        help="Create a tool record from an entry and bind it in one step",
+        help="Create a tool instance — from an entry (bound) or a catalog (unbound)",
+        description="Two context-aware forms. MACHINE TOOL_NUMBER creates an "
+                    "instance from a machine entry and BINDS it to that position. "
+                    "--from-catalog creates an instance from a catalog record and "
+                    "leaves it UNBOUND (a catalog is not a machine position).",
     )
-    create_record_parser.add_argument("machine", help="Machine id or unique prefix")
-    create_record_parser.add_argument("tool_number", type=int, help="Tool number (e.g. 3)")
     create_record_parser.add_argument(
-        "--name", help="Name for the new record (defaults to the entry description)"
+        "machine", nargs="?", help="Machine id or unique prefix (entry form)"
     )
-    create_record_parser.set_defaults(
-        func=lambda args: create_record_from_entry(args.machine, args.tool_number, args.name)
+    create_record_parser.add_argument(
+        "tool_number", nargs="?", type=int, help="Tool number, e.g. 3 (entry form)"
     )
+    create_record_parser.add_argument(
+        "--from-catalog", metavar="CATALOG",
+        help="Create an UNBOUND instance from a catalog record "
+             "(id/prefix/name/product_code)",
+    )
+    create_record_parser.add_argument(
+        "--name",
+        help="Name for the new instance (entry form: defaults to the entry "
+             "description; catalog form: defaults to the catalog record's name)",
+    )
+    create_record_parser.add_argument(
+        "--qa", metavar="FILE",
+        help="Manufacturer QA: a geometry-shaped JSON file ({diameter:{value,"
+             "unit}, ...}) measured on the certified tool (catalog form only; "
+             "requires --cert)",
+    )
+    create_record_parser.add_argument(
+        "--cert",
+        help="Certificate/serial the --qa measurements are recorded against; the "
+             "server stamps them observed:manufacturer@<serial> (required iff --qa)",
+    )
+    create_record_parser.set_defaults(func=create_record)
 
     # === create-machine ===
     create_machine_parser = subparsers.add_parser(
@@ -1512,6 +1907,75 @@ Environment Variables:
     )
     create_set_parser.add_argument("name", help="Tool set name")
     create_set_parser.set_defaults(func=lambda args: create_set(args.name))
+
+    add_to_set_parser = subparsers.add_parser(
+        "add-to-set", help="Add one or more tools to a tool set",
+        description="Append tool record(s) to a set's membership. Existing "
+                    "members (and their numbers) are kept; a tool already in the "
+                    "set is skipped. SET and each TOOL resolve by id, name, or "
+                    "unique prefix.",
+    )
+    add_to_set_parser.add_argument("set", help="Tool set id, name, or unique prefix")
+    add_to_set_parser.add_argument("tool", nargs="+",
+                                   help="Tool record id(s), name(s), or unique prefix(es)")
+    add_to_set_parser.set_defaults(func=lambda args: add_to_set(args.set, args.tool))
+
+    remove_from_set_parser = subparsers.add_parser(
+        "remove-from-set", help="Remove one or more tools from a tool set",
+        description="Remove tool record(s) from a set's membership; the rest are "
+                    "kept. SET and each TOOL resolve by id, name, or unique prefix.",
+    )
+    remove_from_set_parser.add_argument("set", help="Tool set id, name, or unique prefix")
+    remove_from_set_parser.add_argument("tool", nargs="+",
+                                        help="Tool record id(s), name(s), or unique prefix(es)")
+    remove_from_set_parser.set_defaults(
+        func=lambda args: remove_from_set(args.set, args.tool))
+
+    # === create-catalog-record ===
+    create_catalog_parser = subparsers.add_parser(
+        "create-catalog-record",
+        help="Create a catalog record from JSON (stdin/--file) or flags",
+        description="Create a ToolCatalogRecord in one atomic, audited call. "
+                    "Nominal fields come from JSON on stdin (the '-' convention) "
+                    "or --file, plus convenience flags. --source is the declared "
+                    "actor; the server stamps 'asserted:<source>' on every field.",
+    )
+    create_catalog_parser.add_argument(
+        "input", nargs="?",
+        help="'-' to read JSON from stdin (default when piped), or a path",
+    )
+    create_catalog_parser.add_argument(
+        "--source", required=True,
+        help="Declared actor, e.g. manufacturer:kennametal "
+             "(server stamps asserted:<source> on every field)",
+    )
+    create_catalog_parser.add_argument("--file", help="Read nominal fields JSON from this file")
+    create_catalog_parser.add_argument("--name", help="Catalog record name")
+    create_catalog_parser.add_argument("--manufacturer", help="Manufacturer")
+    create_catalog_parser.add_argument("--product-code", help="Manufacturer product code")
+    create_catalog_parser.add_argument("--diameter", type=float, help="Nominal diameter (mm)")
+    create_catalog_parser.add_argument("--flutes", type=int, help="Flute count")
+    create_catalog_parser.set_defaults(func=lambda args: create_catalog_record(
+        source=args.source,
+        file=args.file or (args.input if args.input and args.input != "-" else None),
+        name=args.name, manufacturer=args.manufacturer,
+        product_code=args.product_code, diameter=args.diameter, flutes=args.flutes,
+    ))
+
+    # === list-catalog-records ===
+    list_catalog_parser = subparsers.add_parser(
+        "list-catalog-records", help="List catalog records (ToolCatalogRecords)"
+    )
+    list_catalog_parser.set_defaults(func=lambda _: list_catalog_records())
+
+    # === show-catalog-record ===
+    show_catalog_parser = subparsers.add_parser(
+        "show-catalog-record", help="Show one catalog record with provenance"
+    )
+    show_catalog_parser.add_argument(
+        "catalog", help="Catalog record id, unique prefix, name, or product_code"
+    )
+    show_catalog_parser.set_defaults(func=lambda args: show_catalog_record(args.catalog))
 
     # === push ===
     push_parser = subparsers.add_parser(
@@ -1583,6 +2047,16 @@ Environment Variables:
         description="End the current session (clears session cookie)."
     )
     logout_parser.set_defaults(func=lambda _: logout())
+
+    # Optional shell tab-completion. argcomplete is NOT a dependency — this file
+    # stays stdlib-only and fully runnable without it; when argcomplete is
+    # present and registered (see README/CLI.md), it wires up completion for
+    # every subcommand and flag derived from this parser. No-op when absent.
+    try:
+        import argcomplete
+        argcomplete.autocomplete(parser)
+    except ImportError:
+        pass
 
     # Parse args
     args = parser.parse_args()

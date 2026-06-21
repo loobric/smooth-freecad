@@ -315,6 +315,40 @@ def instance_to_fctb(record):
     return doc
 
 
+def catalog_to_fctb(catalog_record, instance_record):
+    """Synthesize a .fctb for a tool just created from a catalog record.
+
+    Two sectioned records meet here:
+
+    - ``catalog_record`` (a ToolCatalogRecord) holds the usable NOMINAL geometry
+      and name in its ``canonical`` section — the shape and dimensions the local
+      bit must take.
+    - ``instance_record`` (the ToolInstanceRecord the catalog->instance door just
+      created) carries the new ``internal.id`` the local tool must track, but its
+      OWN ``canonical.geometry`` is deliberately EMPTY: at creation the physical
+      tool has not been measured, so its measured geometry is unknown. The usable
+      shape therefore has to come from the catalog's nominal geometry, not the
+      instance.
+
+    Built by reusing :func:`instance_to_fctb` on a merged record: the instance's
+    ``internal`` (so ``smooth.record_id`` is the NEW instance's id), the catalog's
+    canonical geometry (the nominal shape + dimensions), and the instance's own
+    name when it set one (a ``--name`` override) else the catalog's name. Empty
+    ``clients`` — there is no prior .fctb to preserve. Pure; inputs untouched."""
+    catalog = catalog_record or {}
+    instance = instance_record or {}
+    merged_canonical = copy.deepcopy(catalog.get("canonical") or {})
+    inst_name = (instance.get("canonical") or {}).get("name")
+    if _field_value(inst_name) is not None:
+        merged_canonical["name"] = copy.deepcopy(inst_name)
+    merged = {
+        "internal": instance.get("internal") or {},
+        "canonical": merged_canonical,
+        "clients": {},
+    }
+    return instance_to_fctb(merged)
+
+
 # ---------------------------------------------------------------------------
 # .fctl <-> ToolSet
 # ---------------------------------------------------------------------------
