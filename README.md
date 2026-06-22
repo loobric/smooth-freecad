@@ -72,7 +72,8 @@ Settings are stored in `~/.config/smooth/freecad.json`.
 ## Using it
 
 Switch to the **CAM** workbench and click the **Smooth** button. A modeless
-window opens (FreeCAD stays usable beside it) with four tabs.
+window opens (FreeCAD stays usable beside it) with four tabs — Sync, Catalog,
+Machines, and Audit log.
 
 ### Sync
 
