@@ -3,6 +3,14 @@
 All notable changes to **smooth-freecad** (the FreeCAD CAM client for Smooth) are
 recorded here. This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.3.1] — 2026-06-23
+
+### Fixed
+- A plain download no longer triggers a phantom "local is newer — upload"
+  prompt that forced a second apply. The client now records its section baseline
+  on pull, so a download converges in a single apply (download is symmetric with
+  upload).
+
 ## [0.3.0] — 2026-06-21
 
 The **M2** client: browse the server's catalog records and create tools from

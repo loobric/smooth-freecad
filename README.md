@@ -72,7 +72,7 @@ Settings are stored in `~/.config/smooth/freecad.json`.
 ## Using it
 
 Switch to the **CAM** workbench and click the **Smooth** button. A modeless
-window opens (FreeCAD stays usable beside it) with three tabs.
+window opens (FreeCAD stays usable beside it) with four tabs.
 
 ### Sync
 
@@ -95,6 +95,15 @@ The server marks each canonical field with the side that changed it.
 
 Right-click a row for management actions: inspect the record, rename, set tool
 type, delete on the server, or link a tool set to a machine.
+
+### Catalog
+
+Browse the server's catalog records — name, manufacturer, product code,
+geometry, and provenance source — read-only. Pick one and **Create tool from
+catalog** makes an unbound tool on the server from that type and immediately
+materializes a local `.fctb` in your active tools library, pre-filled from the
+catalog's nominal geometry and linked back to the new tool. It lands already in
+sync. Reload the CAM tool library to see it in the editor.
 
 ### Machines
 
