@@ -5,7 +5,7 @@
 """
 Tests for the GUI view-model (pure, headless): the two render builders the
 widgets consume — :func:`sync_tree` (the Sync tab's grouped plan, with the
-'needs attention' filter as a view over the one plan) and :func:`machine_tables`
+'out of sync' filter as a view over the one plan) and :func:`machine_tables`
 (the Machines tab's per-machine tool tables with pending bindings folded in) —
 plus the rollup and resolution helpers.
 """

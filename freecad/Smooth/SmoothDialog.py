@@ -7,7 +7,7 @@ Smooth — the tabbed desktop window.
 
 A deliberately small shell of three tabs over a single shared API client (so all
 HTTP traffic lands in one call log): **Sync** (the one CAM surface — plan/apply
-of the local tool directory, with a needs-attention filter and per-set/-tool
+of the local tool directory, with an out-of-sync filter and per-set/-tool
 management), **Machines** (the one binding surface — tool tables with the Inbox
 folded in), and **Audit**. A header shows the server + connection state; raw
 sectioned-record JSON inspection and a live API log are demoted behind a

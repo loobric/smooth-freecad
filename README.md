@@ -84,7 +84,7 @@ Each changed row gets a direction:
 - download server -> local
 - leave unsynced
 
-A **Needs attention only** filter hides everything that is already in sync. Set a
+An **Out of sync only** filter hides everything that is already in sync. Set a
 direction on a tool-set (folder) row to apply it to every tool inside at once,
 then click **Apply Selected**. Nothing touches disk or the server until you
 apply.

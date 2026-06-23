@@ -8,8 +8,8 @@ The three tabs of the Smooth window (SmoothDialog.py), plus shared widgets.
 The information architecture is deliberately small (reboot Phase 3):
 
 - **Sync** — the one CAM surface: a hierarchical ToolSet→tool plan of the local
-  FreeCAD tool directory against the server, with a "needs attention" filter
-  (attention is a *view* over the single plan, not a second screen) and per-row
+  FreeCAD tool directory against the server, with an "out of sync" filter
+  (it is a *view* over the single plan, not a second screen) and per-row
   upload/download decisions. Tool/ToolSet management (rename, set type, delete,
   link a set to a machine) lives here as row actions; a changed row opens a
   side-by-side resolution.
@@ -248,7 +248,7 @@ class SyncTab(_Tab):
     """Hierarchical browse of every ToolSet and its tools, each set labelled with
     a derived rollup (✓ synced · ↑ local-only · ↓ server-only · ⚠ conflicts).
     Set a direction on a folder node to cascade it; each row is still
-    individually overridable. A 'needs attention' filter narrows to the items
+    individually overridable. An 'out of sync' filter narrows to the items
     that aren't in sync. Right-click a row for management (rename, set type,
     delete, link a set to a machine); double-click a changed row to resolve it
     field-by-field. Nothing touches disk or server until Apply."""
@@ -296,7 +296,7 @@ class SyncTab(_Tab):
         top.addWidget(hint, stretch=1)
         # A checkable button (not a checkbox) so the on/off state is visible on
         # every FreeCAD theme — some render the checkbox indicator invisibly.
-        self.attention_button = QtGui.QPushButton("Needs attention only")
+        self.attention_button = QtGui.QPushButton("Out of sync only")
         self.attention_button.setCheckable(True)
         self.attention_button.setToolTip(
             "Show only items that aren't in sync (hide everything already synced).")

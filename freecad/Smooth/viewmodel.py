@@ -283,7 +283,7 @@ def sync_tree(plan_items, attention_only=False):
 
     ``attention_only`` filters to just the items needing sync — dropping in-sync
     tools and any group left with neither an actionable ToolSet row nor members
-    (so 'needs attention' is a view over this one plan, never a second plan)."""
+    (so 'out of sync' is a view over this one plan, never a second plan)."""
     items = plan_items or []
     libraries = [i for i in items if i.get("kind") == "library"]
     bits = [i for i in items if i.get("kind") == "bit"]
