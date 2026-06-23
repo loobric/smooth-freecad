@@ -655,8 +655,12 @@ def test_type_correction_on_download_heals_the_server_record(tmp_path):
 
 
 @pytest.mark.unit
-def test_plain_download_without_correction_does_not_touch_server(tmp_path):
-    """A download with NO type change stays a pure pull — no server writes."""
+def test_plain_download_records_freecad_baseline(tmp_path):
+    """A plain download (NO type change) still records FreeCAD's client section
+    as the synced baseline — the canonical fields are untouched, only the
+    lossless ``clients.freecad.data.fctb`` is written (download symmetric with
+    upload). This is the new contract after #11: the section write is no longer
+    gated on a shape correction, so the next plan has a 3-way base."""
     (tmp_path / "Bit").mkdir()
     (tmp_path / "Library").mkdir()
     server = FakeServer()
@@ -666,10 +670,59 @@ def test_plain_download_without_correction_does_not_touch_server(tmp_path):
               "shape-type": "Endmill", "attribute": {},
               "parameter": {"Diameter": "6.00 mm"}})
     record_id = rid_of(record)
-    snapshot = json.dumps(server.instances[record_id], sort_keys=True)
+    canonical_before = json.dumps(
+        server.instances[record_id]["canonical"], sort_keys=True)
 
     plan = sync.plan_sync(str(tmp_path), server)
     sync.apply_sync(str(tmp_path), server, plan,
                     {"server:%s" % record_id: "pull"},
                     shapes={"server:%s" % record_id: "endmill"})
-    assert json.dumps(server.instances[record_id], sort_keys=True) == snapshot
+
+    # canonical (the asserted facts) is NOT touched by a plain pull …
+    assert json.dumps(
+        server.instances[record_id]["canonical"], sort_keys=True) \
+        == canonical_before
+    # … but FreeCAD's client section now holds the downloaded .fctb baseline.
+    section = server.instances[record_id]["clients"]["freecad"]
+    assert section["data"]["fctb"]["shape-type"] == "Endmill"
+
+
+@pytest.mark.unit
+def test_plain_download_then_replan_is_unchanged_not_push(tmp_path):
+    """Regression for #11 (ROUNDTRIP steps 4->5): an instance whose
+    ``clients.freecad`` is EMPTY (created by the web-UI bind step, never touched
+    by FreeCAD) has no 3-way-diff base. Downloading it must record that base so
+    the very next plan reads 'unchanged' — not a phantom 'push' that forces a
+    second apply.
+
+    Before the fix the section stayed empty after a plain pull, leaving the
+    record without a base; this test pins both effects: the server section is
+    populated, and the re-plan converges in one apply.
+    """
+    (tmp_path / "Bit").mkdir()
+    (tmp_path / "Library").mkdir()
+    server = FakeServer()
+    # An instance with EMPTY clients.freecad: born from the bind step, with
+    # canonical name + geometry asserted, but no FreeCAD .fctb section.
+    record = server.create_instance()      # no data, no client_item_id
+    record_id = rid_of(record)
+    server.assert_instance(record_id, "name", "Bound 6mm")
+    server.assert_instance(record_id, "geometry.shape", "endmill")
+    server.assert_instance(record_id, "geometry.diameter", 6.0)
+    assert server.instances[record_id]["clients"] == {}   # truly no base
+
+    plan = sync.plan_sync(str(tmp_path), server)
+    item = plan_by_key(plan)["server:%s" % record_id]
+    assert item["action"] == "new_server"
+    summary = sync.apply_sync(str(tmp_path), server, plan,
+                              {item["key"]: "pull"})
+    assert summary["pulled"] == 1 and summary["errors"] == []
+
+    # The fix: the pull recorded FreeCAD's baseline section on the server …
+    assert "freecad" in server.instances[record_id]["clients"]
+    assert sync._base_fctb(server.instances[record_id]) is not None
+
+    # … so the next plan now has a base and reads 'unchanged' — no phantom push.
+    plan2 = plan_by_key(sync.plan_sync(str(tmp_path), server))
+    bit = next(i for i in plan2.values() if i["kind"] == "bit")
+    assert bit["action"] == "unchanged"

@@ -728,12 +728,22 @@ def apply_sync(tools_dir, client, plan, decisions, shapes=None, log=lambda msg: 
             % (rid[:8], basename, regenerated.get("shape-type", "?"),
                " type set to %s" % chosen if chosen else ""))
 
-        # Heal the server's client section too, so its stored .fctb matches the
-        # corrected type and the next sync converges (no pending push-back).
-        if chosen and chosen != mapping.fctb_shape(_base_fctb(record)):
-            healed = mapping.record_to_instance_sections(
-                regenerated, client_item_id=basename)
-            client.put_instance_section(rid, healed.data, healed.client_item_id)
+        # ALWAYS record FreeCAD's client section after a successful pull, not
+        # only on a shape heal (#11). Downloading a tool means FreeCAD now holds
+        # this .fctb; storing it in FreeCAD's own client section is exactly what
+        # the section is for, and it makes download symmetric with upload. It
+        # also establishes the 3-way-diff base (clients.freecad.data.fctb): a
+        # plain download that left this empty had no base, so the next plan
+        # misclassified the just-written file and forced a phantom second apply
+        # (ROUNDTRIP steps 4->5). Lane-safe: a client section can never carry
+        # internal/canonical. Capture whether this is also a type correction
+        # BEFORE the write (the record is the live server object, so the put
+        # would otherwise hide the pre-write base shape).
+        corrected = bool(chosen) and chosen != mapping.fctb_shape(_base_fctb(record))
+        healed = mapping.record_to_instance_sections(
+            regenerated, client_item_id=basename)
+        client.put_instance_section(rid, healed.data, healed.client_item_id)
+        if corrected:
             log("  corrected server record %s: shape -> %s (binding kept)"
                 % (rid[:8], chosen))
 
