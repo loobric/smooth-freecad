@@ -69,6 +69,27 @@ FreeCAD 1.1 or later.
 
 Settings are stored in `~/.config/smooth/freecad.json`.
 
+### Try against the sandbox
+
+No server of your own? Use the free hosted sandbox:
+
+1. In **Preferences -> CAM -> Smooth**, set the server URL to
+   `https://api.loobric.com` (it's the default).
+2. Create an account and an API key with the Python client, then paste the key
+   into the preference page:
+   ```bash
+   pip install loobric-smooth
+   export SMOOTH_BASE_URL=https://api.loobric.com
+   smooth register you@example.com
+   smooth login you@example.com
+   smooth create-key freecad --scopes "read write"   # paste the printed key into FreeCAD
+   ```
+3. Click **Test Connection**, then **Apply**.
+
+The sandbox is a shared playground — **data may be reset, so keep nothing real
+there.** Full walkthrough:
+[loobric-smooth/docs/SANDBOX.md](https://github.com/loobric/loobric-smooth/blob/master/docs/SANDBOX.md).
+
 ## Using it
 
 Switch to the **CAM** workbench and click the **Smooth** button. A modeless
