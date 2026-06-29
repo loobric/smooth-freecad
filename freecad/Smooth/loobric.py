@@ -558,6 +558,13 @@ class Client:
                           body={"machine_id": machine_id, **section})
 
     # -- users (admin) -------------------------------------------------------
+    def list_users(self) -> Dict[str, Any]:
+        """The admin account roster (admin-only). Returns {total, users}: the
+        account count plus a per-account summary (email, role, flags, API-key
+        count, created_at), newest first. No secrets — never a password hash or
+        key material. A NotFound means the server predates the endpoint."""
+        return self._call("GET", "/admin/users")
+
     def create_user(self, email: str, password: str, **extra) -> Dict[str, Any]:
         return self._call("POST", "/users",
                           body={"email": email, "password": password, **extra})
@@ -1491,6 +1498,34 @@ def whoami():
         print("  Build:  unknown — older server with no /version endpoint")
 
 
+def list_users():
+    """Show the admin account roster: how many accounts exist and who they are.
+
+    Admin-only on the server. An older server with no /admin/users endpoint
+    surfaces as a clear message rather than a stack trace."""
+    try:
+        data = _client().list_users()
+    except NotFound:
+        print("This server has no /admin/users endpoint (older build).")
+        return
+    users = data.get("users", []) if isinstance(data, dict) else (data or [])
+    total = data.get("total", len(users)) if isinstance(data, dict) else len(users)
+    print(f"  {total} account(s).")
+    for u in users:
+        flags = []
+        if u.get("is_admin"):
+            flags.append("admin")
+        if not u.get("is_active", True):
+            flags.append("inactive")
+        if u.get("is_verified"):
+            flags.append("verified")
+        suffix = f" [{', '.join(flags)}]" if flags else ""
+        when = (u.get("created_at") or "")[:10]
+        keys = u.get("api_key_count", 0)
+        print(f"  {u.get('email', ''):32}  {u.get('role', ''):12}  "
+              f"keys={keys:<3}  {when}{suffix}")
+
+
 def list_audit(limit=50):
     """Show recent audit-log entries (who changed what, when)."""
     data = _client().list_audit_logs()
@@ -1646,6 +1681,7 @@ def main():
   loobric assert tool-set-records <id> name "Aluminum job v2"
 
   # Admin / housekeeping
+  loobric list-users                    # how many accounts exist and who they are
   loobric reset --yes                   # wipe all tool data (keeps login + keys)
   loobric backup-export --out backup.json
   loobric backup-import backup.json
@@ -2005,6 +2041,11 @@ Environment Variables:
     # === whoami ===
     whoami_parser = subparsers.add_parser("whoami", help="Show the authenticated account")
     whoami_parser.set_defaults(func=lambda _: whoami())
+
+    # === list-users (admin) ===
+    list_users_parser = subparsers.add_parser(
+        "list-users", help="List all accounts: how many exist and who they are (admin)")
+    list_users_parser.set_defaults(func=lambda _: list_users())
 
     # === audit ===
     audit_parser = subparsers.add_parser("audit", help="Show recent audit-log entries")

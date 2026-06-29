@@ -3,6 +3,16 @@
 All notable changes to **smooth-freecad** (the FreeCAD CAM client for Smooth) are
 recorded here. This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.3.2] — 2026-06-29
+
+### Added
+- **`loobric list-users` — the admin account roster.** A reference-client verb
+  (and `Client.list_users()` library method) onto smooth-core's new
+  `GET /api/v1/admin/users`: how many accounts exist and who they are (email,
+  role, flags, API-key count, created date), newest first. Admin-only on the
+  server; an older server with no such endpoint reports it plainly. No secrets
+  are shown — never a password hash or key material. Needs smooth-core ≥ 0.3.5.
+
 ## [0.3.1] — 2026-06-23
 
 ### Fixed
