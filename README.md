@@ -156,6 +156,7 @@ HTTP traffic. Inspecting a record's raw JSON is a right-click action on any row.
 
 ## Links
 
+- [CONTRIBUTING.md](./CONTRIBUTING.md) — how to contribute (MIT, DCO sign-off, no CLA)
 - [TECHNICAL.md](./TECHNICAL.md) — data model and how the FreeCAD formats map to
   the Smooth schema
 - [DEVELOPMENT.md](./DEVELOPMENT.md) — contributor guide, layout, and tests
@@ -165,7 +166,8 @@ HTTP traffic. Inspecting a record's raw JSON is a right-click action on any row.
 
 ## License
 
-MIT — see [LICENSE](./LICENSE).
+MIT — see [LICENSE](./LICENSE). Contributions welcome under DCO sign-off — see
+[CONTRIBUTING.md](./CONTRIBUTING.md) (no CLA).
 
 Developed by the Loobric project team. Thanks to the FreeCAD community for the
 CAM workbench and to the ISO 13399 standard for tool-data modeling.
