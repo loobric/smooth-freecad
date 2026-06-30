@@ -1,0 +1,47 @@
+name: "DCO"
+
+# Enforces the Developer Certificate of Origin: every non-merge commit in a PR
+# must carry a `Signed-off-by:` trailer matching its author (use `git commit -s`).
+# Self-contained — no third-party app or action to install.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  dco-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out PR commits
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify Signed-off-by on every commit
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          fail=0
+          # --no-merges: merge commits don't need a sign-off.
+          for sha in $(git rev-list --no-merges "$BASE_SHA".."$HEAD_SHA"); do
+            author="$(git show -s --format='%an <%ae>' "$sha")"
+            subject="$(git show -s --format='%s' "$sha")"
+            if ! git show -s --format='%B' "$sha" \
+                 | grep -qiE "^Signed-off-by: .+ <.+@.+>$"; then
+              echo "::error::Missing Signed-off-by on ${sha:0:8} \"$subject\" by $author"
+              fail=1
+            fi
+          done
+          if [ "$fail" -ne 0 ]; then
+            echo ""
+            echo "One or more commits are missing a DCO sign-off."
+            echo "Add it by amending/rebasing with: git commit -s  (or: git rebase --signoff)"
+            echo "See CONTRIBUTING.md."
+            exit 1
+          fi
+          echo "All commits are signed off. Thanks!"
