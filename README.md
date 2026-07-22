@@ -78,7 +78,7 @@ No server of your own? Use the free hosted sandbox:
 2. Create an account and an API key with the Python client, then paste the key
    into the preference page:
    ```bash
-   pip install loobric-loobric
+   pip install loobric-cli
    export LOOBRIC_BASE_URL=https://api.loobric.com
    loobric register you@example.com
    loobric login you@example.com
@@ -88,7 +88,7 @@ No server of your own? Use the free hosted sandbox:
 
 The sandbox is a shared playground — **data may be reset, so keep nothing real
 there.** Full walkthrough:
-[loobric-loobric/docs/SANDBOX.md](https://github.com/loobric/loobric-loobric/blob/master/docs/SANDBOX.md).
+[loobric-cli/docs/SANDBOX.md](https://github.com/loobric/loobric-cli/blob/master/docs/SANDBOX.md).
 
 ## Using it
 
