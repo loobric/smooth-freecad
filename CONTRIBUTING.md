@@ -1,11 +1,11 @@
-# Contributing to smooth-freecad
+# Contributing to loobric-freecad
 
 Thanks for your interest in contributing. This is a **reference client** for
-[Smooth Core](https://github.com/loobric/smooth-core), licensed **MIT**.
+[Loobric Server](https://github.com/loobric/loobric-server), licensed **MIT**.
 
 ## No CLA — just a DCO sign-off
 
-Unlike the AGPL-licensed `smooth-core` server (which requires a Contributor
+Unlike the AGPL-licensed `loobric-server` server (which requires a Contributor
 License Agreement), the MIT-licensed client repositories do **not** require a
 CLA. Instead, we use the **Developer Certificate of Origin (DCO)**: a simple,
 per-commit statement that you wrote the patch or otherwise have the right to
@@ -36,7 +36,7 @@ git rebase --signoff main
 
 - [DEVELOPMENT.md](./DEVELOPMENT.md) — environment setup, repo layout, and tests.
 - [TECHNICAL.md](./TECHNICAL.md) — data model and how the FreeCAD formats map to
-  the Smooth schema.
+  the Loobric schema.
 
 ## Pull requests
 

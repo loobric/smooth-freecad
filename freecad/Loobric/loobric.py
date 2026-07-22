@@ -4,7 +4,7 @@
 # Copyright (c) 2025 sliptonic
 # SPDX-License-Identifier: MIT
 #
-# loobric.py is THE reference Python client for Loobric Core: a single,
+# loobric.py is THE reference Python client for Loobric Server: a single,
 # stdlib-only file that exercises every public API operation. It is licensed MIT
 # (not AGPL like the server it lives beside) so MIT clients may vendor or import
 # it. Other Python clients (FreeCAD, future Fusion) reuse this rather than
@@ -14,7 +14,7 @@
 # errors, no printing) usable via `import loobric`, and a thin CLI shell
 # (argparse + formatting) usable via `python loobric.py <verb>`.
 """
-Loobric CLI Utility - Manage authentication and API keys for Loobric Core
+Loobric CLI Utility - Manage authentication and API keys for Loobric Server
 
 Usage:
     # Interactive login (saves session)
