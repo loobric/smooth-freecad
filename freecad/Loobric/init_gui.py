@@ -3,10 +3,10 @@
 # SPDX-License-Identifier: MIT
 
 """
-Smooth FreeCAD Addon - GUI initialization.
+Loobric FreeCAD Addon - GUI initialization.
 
 This addon provides bidirectional synchronization between FreeCAD CAM tool libraries
-and the Smooth tool data exchange system.
+and the Loobric tool data exchange system.
 
 This addon does NOT create a separate workbench. Instead it:
 1. Adds a preference page to FreeCAD preferences
@@ -22,25 +22,25 @@ def initialize():
     if not App.GuiUp:
         return
     
-    App.Console.PrintMessage("Initializing Smooth...\n")
+    App.Console.PrintMessage("Initializing Loobric...\n")
 
     # Import siblings via the package namespace — FreeCAD loads this addon as
-    # `freecad.Smooth`, so bare `import SmoothCommands` fails from a normal
+    # `freecad.Loobric`, so bare `import LoobricCommands` fails from a normal
     # install (part of issue #4). Fall back to flat imports only for a dev/legacy
     # layout where the package dir is on sys.path.
     try:
-        from freecad.Smooth import SmoothCommands, SmoothPreferences
+        from freecad.Loobric import LoobricCommands, LoobricPreferences
     except ImportError:
-        import SmoothCommands
-        import SmoothPreferences
+        import LoobricCommands
+        import LoobricPreferences
 
-    # Registering commands runs Gui.addCommand (on import of SmoothCommands).
-    _ = SmoothCommands
+    # Registering commands runs Gui.addCommand (on import of LoobricCommands).
+    _ = LoobricCommands
 
     # Register preference page
     try:
-        Gui.addPreferencePage(SmoothPreferences.SmoothPreferencePage, "CAM")
-        App.Console.PrintMessage("Smooth preference page registered\n")
+        Gui.addPreferencePage(LoobricPreferences.LoobricPreferencePage, "CAM")
+        App.Console.PrintMessage("Loobric preference page registered\n")
     except Exception as e:
         App.Console.PrintError(f"Failed to register preference page: {e}\n")
         import traceback
@@ -48,30 +48,30 @@ def initialize():
     
     # Register workbench manipulator
     try:
-        class SmoothManipulator:
+        class LoobricManipulator:
             def modifyToolBars(self):
-                return [{"append" : "Smooth_Sync", "toolBar" : "Tool Commands"}]
+                return [{"append" : "Loobric_Sync", "toolBar" : "Tool Commands"}]
                 
             def modifyMenuBar(self):
-                return [{"insert" : "Smooth_Sync", "menuItem" : "CAM_ToolBitDock", "after": ""}]
+                return [{"insert" : "Loobric_Sync", "menuItem" : "CAM_ToolBitDock", "after": ""}]
 
 
         App.Console.PrintMessage("Creating workbench manipulator...\n")
         
 
-        manipulator = SmoothManipulator()
+        manipulator = LoobricManipulator()
         App.Console.PrintMessage("Registering workbench manipulator...\n")
         Gui.addWorkbenchManipulator(manipulator)
-        App.Console.PrintMessage("Smooth workbench manipulator registered\n")
+        App.Console.PrintMessage("Loobric workbench manipulator registered\n")
     except Exception as e:
         App.Console.PrintError(f"Failed to register workbench manipulator: {e}\n")
         import traceback
         traceback.print_exc()
     
-    App.Console.PrintMessage("Smooth addon initialized\n")
+    App.Console.PrintMessage("Loobric addon initialized\n")
 
 
 # Call initialize when module is loaded
-App.Console.PrintMessage("Loading Smooth GUI...\n")
+App.Console.PrintMessage("Loading Loobric GUI...\n")
 initialize()
 

@@ -3,11 +3,11 @@
 # SPDX-License-Identifier: MIT
 
 """
-Tests for the plan/apply sync over the **sectioned** schema (smooth-freecad#7).
+Tests for the plan/apply sync over the **sectioned** schema (loobric-freecad#7).
 
 The contract under test, exercised against the in-memory sectioned
 ``FakeServer`` (conftest), which returns ``{internal, canonical, clients}``
-records exactly as smooth-core's tool-schema endpoints do:
+records exactly as loobric-server's tool-schema endpoints do:
 
 - ``plan_sync`` classifies every item correctly and touches NOTHING (neither
   disk nor server).
@@ -16,7 +16,7 @@ records exactly as smooth-core's tool-schema endpoints do:
 - The decision is the human-chosen DIRECTION; the classification is only the
   suggested default — a 'push' uploads the local version (section write +
   canonical asserts), a 'pull' rewrites the file from the record.
-- Identity survives the FreeCAD editors wiping the additive ``smooth`` key:
+- Identity survives the FreeCAD editors wiping the additive ``loobric`` key:
   re-adoption never duplicates a record, never matches by name.
 - The endmill bug stays dead: a download lets the user choose/correct the tool
   type before the .fctb is synthesized, and a correction heals the server too.
@@ -29,7 +29,7 @@ from pathlib import Path
 
 import pytest
 
-from freecad.Smooth import sync
+from freecad.Loobric import sync
 from conftest import FakeServer
 
 
@@ -133,7 +133,7 @@ def test_apply_only_selected(tools_dir):
                               {"bit:drill_5.0mm.fctb": "push"})
     assert summary["pushed"] == 1 and summary["errors"] == []
     assert len(server.instances) == 1
-    assert "smooth" not in read(tools_dir / "Bit" / "probe.fctb")  # untouched
+    assert "loobric" not in read(tools_dir / "Bit" / "probe.fctb")  # untouched
 
 
 @pytest.mark.unit
@@ -271,11 +271,11 @@ def test_editor_reformat_is_not_a_change(tools_dir):
 
     p = tools_dir / "Bit" / "end_mill_6.0mm_2f.fctb"
     doc = read(p)
-    smooth_key = doc.pop("smooth")
+    loobric_key = doc.pop("loobric")
     for k, v in list(doc["parameter"].items()):
         if isinstance(v, str) and v.endswith(" mm"):
             doc["parameter"][k] = "%.4f mm" % float(v.split()[0])
-    doc["smooth"] = smooth_key
+    doc["loobric"] = loobric_key
     p.write_text(json.dumps(doc))
 
     item = plan_by_key(sync.plan_sync(str(tools_dir), server))["bit:end_mill_6.0mm_2f.fctb"]
@@ -331,7 +331,7 @@ def test_deleted_local_can_restore_instead(tools_dir):
 def test_deleted_on_server_can_delete_local(tools_dir):
     server = FakeServer()
     push_everything(tools_dir, server)
-    probe_rid = read(tools_dir / "Bit" / "probe.fctb")["smooth"]["record_id"]
+    probe_rid = read(tools_dir / "Bit" / "probe.fctb")["loobric"]["record_id"]
     del server.instances[probe_rid]
 
     item = plan_by_key(sync.plan_sync(str(tools_dir), server))["bit:probe.fctb"]
@@ -350,14 +350,14 @@ def test_deleted_server_record_recreated_on_push(tools_dir):
     fresh create on explicit push, never erroring forever."""
     server = FakeServer()
     push_everything(tools_dir, server)
-    victim = read(tools_dir / "Bit" / "probe.fctb")["smooth"]["record_id"]
+    victim = read(tools_dir / "Bit" / "probe.fctb")["loobric"]["record_id"]
     del server.instances[victim]
 
     plan = sync.plan_sync(str(tools_dir), server)
     summary = sync.apply_sync(str(tools_dir), server, plan,
                               {"bit:probe.fctb": "push"})
     assert summary["errors"] == [] and summary["pushed"] == 1
-    new_id = read(tools_dir / "Bit" / "probe.fctb")["smooth"]["record_id"]
+    new_id = read(tools_dir / "Bit" / "probe.fctb")["loobric"]["record_id"]
     assert new_id != victim and new_id in server.instances
 
 
@@ -393,9 +393,9 @@ def test_library_member_without_record_is_reported(tools_dir):
 # -- Re-adoption after the editors wipe the identity key ---------------------
 
 @pytest.mark.unit
-def test_editor_wiped_smooth_key_bit_readopts_no_duplicate(tools_dir):
+def test_editor_wiped_loobric_key_bit_readopts_no_duplicate(tools_dir):
     """FreeCAD's ToolBit editor drops unknown top-level keys on save,
-    destroying the 'smooth' identity key. Re-sync must re-adopt the server
+    destroying the 'loobric' identity key. Re-sync must re-adopt the server
     record by the .fctb 'id' (held server-side as client_item_id), never
     duplicate."""
     server = FakeServer()
@@ -404,7 +404,7 @@ def test_editor_wiped_smooth_key_bit_readopts_no_duplicate(tools_dir):
 
     path = tools_dir / "Bit" / "drill_5.0mm.fctb"
     doc = read(path)
-    old_id = doc.pop("smooth")["record_id"]
+    old_id = doc.pop("loobric")["record_id"]
     doc["parameter"]["Diameter"] = "5.20 mm"     # the edit the user made
     path.write_text(json.dumps(doc))
 
@@ -417,12 +417,12 @@ def test_editor_wiped_smooth_key_bit_readopts_no_duplicate(tools_dir):
                               {"bit:drill_5.0mm.fctb": "push"})
     assert summary["errors"] == []
     assert len(server.instances) == 3            # NO duplicate
-    assert read(path)["smooth"]["record_id"] == old_id   # identity restored
+    assert read(path)["loobric"]["record_id"] == old_id   # identity restored
 
 
 @pytest.mark.unit
 def test_editor_wiped_fctl_key_readopts_no_duplicate_library(tools_dir):
-    """The library editor drops the smooth key the same way; re-adoption via
+    """The library editor drops the loobric key the same way; re-adoption via
     the journal / recorded client_item_id updates the existing set, not a
     duplicate."""
     server = FakeServer()
@@ -431,7 +431,7 @@ def test_editor_wiped_fctl_key_readopts_no_duplicate_library(tools_dir):
 
     fctl_path = tools_dir / "Library" / "default.fctl"
     doc = read(fctl_path)
-    doc.pop("smooth")
+    doc.pop("loobric")
     doc["tools"] = doc["tools"][:1]              # also an edit
     fctl_path.write_text(json.dumps(doc))
 
@@ -444,7 +444,7 @@ def test_editor_wiped_fctl_key_readopts_no_duplicate_library(tools_dir):
     assert len(server.sets) == 1                 # NO duplicate
     set_id = list(server.sets)[0]
     assert len(set_member_ids(server, set_id)) == 1
-    assert "smooth" in read(fctl_path)           # identity restored
+    assert "loobric" in read(fctl_path)           # identity restored
 
 
 # -- Library membership deltas -----------------------------------------------
@@ -454,7 +454,7 @@ def test_library_detail_shows_membership_delta(tools_dir):
     server = FakeServer()
     push_everything(tools_dir, server)
     set_id = list(server.sets)[0]
-    probe_rid = read(tools_dir / "Bit" / "probe.fctb")["smooth"]["record_id"]
+    probe_rid = read(tools_dir / "Bit" / "probe.fctb")["loobric"]["record_id"]
     # add probe to the server set's canonical membership
     members = [{"tool_record_id": rid} for rid in set_member_ids(server, set_id)]
     members.append({"tool_record_id": probe_rid})
@@ -577,7 +577,7 @@ def test_server_born_record_materializes_as_new_file(tools_dir):
     assert len(new_files) == 1
     doc = read(new_files[0])
     assert doc["parameter"]["Diameter"] == "6.35 mm"
-    assert "smooth" in doc                  # adopted: next sync updates, not creates
+    assert "loobric" in doc                  # adopted: next sync updates, not creates
 
 
 @pytest.mark.unit
@@ -617,7 +617,7 @@ def test_download_server_library_groups_and_does_not_recreate_records(tmp_path):
     assert set(server.sets) == before_sets, "pull must NOT create tool sets"
     assert summary["pushed"] == 0 and summary["pulled"] >= 3
     docs = {read(p).get("name"): read(p) for p in (tmp_path / "Bit").glob("*.fctb")}
-    assert docs["T1"]["smooth"]["record_id"] == ids[0]    # stays linked
+    assert docs["T1"]["loobric"]["record_id"] == ids[0]    # stays linked
     assert docs["T1"]["shape"] == "drill.fcstd"            # chosen type applied
     assert docs["T2"]["shape"] == "probe.fcstd"
 

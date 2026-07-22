@@ -3,9 +3,9 @@
 # SPDX-License-Identifier: MIT
 
 """
-FreeCAD addon for Smooth tool data synchronization.
+FreeCAD addon for Loobric tool data synchronization.
 
-This is a reference implementation that validates Smooth's API design
+This is a reference implementation that validates Loobric's API design
 and provides a working example for other CAM integrations.
 
 File Formats:
@@ -20,7 +20,7 @@ import FreeCAD, and this __init__ must not force it.
 
 try:
     import FreeCAD as App
-    App.Console.PrintMessage("Loading Smooth addon (Init.py)...\n")
+    App.Console.PrintMessage("Loading Loobric addon (Init.py)...\n")
 except ImportError:
     # Headless context (tests, CI): the pure modules work without FreeCAD.
     App = None

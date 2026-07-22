@@ -3,12 +3,12 @@
 # SPDX-License-Identifier: MIT
 
 """
-Smooth API access for the FreeCAD client.
+Loobric API access for the FreeCAD client.
 
 This is **not** a hand-rolled HTTP client. Per the project's reference-client
 principle, Python clients import ``loobric`` (the vendored single-file reference
 client, ``loobric.py``) instead of reinventing transport and the API surface.
-``SmoothApi`` is a thin :class:`loobric.Client` subclass that adds only the
+``LoobricApi`` is a thin :class:`loobric.Client` subclass that adds only the
 FreeCAD-specific conveniences:
 
 - the FreeCAD identity baked into the doors — the ``clients`` section key
@@ -20,8 +20,8 @@ FreeCAD-specific conveniences:
 - a recording transport so the demoted API-log panel can still show traffic, and
   so tests can inject a fake transport through the same seam.
 
-Errors are loobric's typed hierarchy. ``SmoothError`` is re-exported as an alias
-of :class:`loobric.LoobricError` so existing ``except SmoothError`` sites keep
+Errors are loobric's typed hierarchy. ``LoobricError`` is re-exported as an alias
+of :class:`loobric.LoobricError` so existing ``except LoobricError`` sites keep
 working; HTTP failures are :class:`loobric.HTTPError` carrying ``.status`` (e.g.
 the 409 install conflict the bind UI distinguishes).
 """
@@ -30,7 +30,7 @@ import time
 from . import loobric, mapping
 
 # Re-exports so callers import error types from one place.
-SmoothError = loobric.LoobricError      # back-compat alias (all loobric failures)
+LoobricError = loobric.LoobricError      # back-compat alias (all loobric failures)
 HTTPError = loobric.HTTPError
 NotFound = loobric.NotFound
 
@@ -45,7 +45,7 @@ INSTANCES = "tool-instance-records"
 SETS = "tool-set-records"
 
 
-class SmoothApi(loobric.Client):
+class LoobricApi(loobric.Client):
     """loobric.Client with FreeCAD's identity, sync-lane helpers, and a call log."""
 
     CALL_LOG_LIMIT = 200

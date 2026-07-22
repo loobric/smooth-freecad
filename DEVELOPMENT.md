@@ -1,12 +1,12 @@
-# Smooth for FreeCAD — Development
+# Loobric for FreeCAD — Development
 
-Contributor notes for **smooth-freecad**, the FreeCAD CAM client for Smooth tool
+Contributor notes for **loobric-freecad**, the FreeCAD CAM client for Loobric tool
 synchronization. For the data model and FreeCAD-to-schema mapping, see
 [TECHNICAL.md](./TECHNICAL.md).
 
 ## AI prompt
 
-AI agents working on **any** Smooth repository should incorporate the following
+AI agents working on **any** Loobric repository should incorporate the following
 into their responses:
 
 1. Favor a functional style of programming over an object-oriented style.
@@ -29,13 +29,13 @@ into their responses:
 The addon is split so that everything except the Qt widgets runs without
 FreeCAD. The pure modules (`mapping.py`, `sync.py`, `client.py`, `loobric.py`,
 `viewmodel.py`) carry the logic and are tested headless; the GUI files
-(`SmoothDialog.py`, `SmoothTabs.py`, `SmoothCommands.py`, `SmoothPreferences.py`,
+(`LoobricDialog.py`, `LoobricTabs.py`, `LoobricCommands.py`, `LoobricPreferences.py`,
 `init_gui.py`) only wire them into FreeCAD.
 
 See the module table in [TECHNICAL.md](./TECHNICAL.md#module-layout) for the role
 of each file. Two points worth repeating here:
 
-- The client is `SmoothApi`, a thin subclass of `loobric.Client`. The vendored
+- The client is `LoobricApi`, a thin subclass of `loobric.Client`. The vendored
   `loobric.py` is the single place HTTP transport and the API surface live.
   There is no hand-rolled HTTP client and no `requests` dependency.
 - The UI is one modeless window with three tabs (Sync, Machines, Audit log) over
@@ -45,17 +45,17 @@ of each file. Two points worth repeating here:
 ## Project structure
 
 ```
-smooth-freecad/
-├── freecad/Smooth/
+loobric-freecad/
+├── freecad/Loobric/
 │   ├── init_gui.py          # addon entry point (commands, prefs, toolbar)
-│   ├── SmoothCommands.py     # CAM command registration
-│   ├── SmoothDialog.py       # the modeless three-tab window shell
-│   ├── SmoothTabs.py         # Sync / Machines / Audit tab widgets
-│   ├── SmoothPreferences.py  # CAM preference page (+ .ui)
+│   ├── LoobricCommands.py     # CAM command registration
+│   ├── LoobricDialog.py       # the modeless three-tab window shell
+│   ├── LoobricTabs.py         # Sync / Machines / Audit tab widgets
+│   ├── LoobricPreferences.py  # CAM preference page (+ .ui)
 │   ├── viewmodel.py          # pure view-model
 │   ├── sync.py               # plan/apply engine (headless)
 │   ├── mapping.py            # FreeCAD <-> sectioned schema (headless)
-│   ├── client.py             # SmoothApi(loobric.Client)
+│   ├── client.py             # LoobricApi(loobric.Client)
 │   ├── loobric.py            # vendored reference Python client (stdlib only)
 │   └── Resources/icons/
 ├── tests/                    # pytest suite (runs headless)
@@ -96,7 +96,7 @@ The suite currently has 81 tests across six files:
 | `test_mapping.py` | `.fctb` / `.fctl` <-> sectioned schema translation |
 | `test_plan_apply.py` | the `sync.py` plan/apply engine |
 | `test_sync_cascade.py` | folder-row direction cascade decisions |
-| `test_client_sectioned.py` | `SmoothApi` sync-lane calls |
+| `test_client_sectioned.py` | `LoobricApi` sync-lane calls |
 | `test_client_inbox_machines.py` | binding, inbox proposals, machines |
 | `test_viewmodel.py` | the view-model builders |
 
@@ -106,9 +106,9 @@ Run the test count yourself rather than trusting this number after changes.
 
 1. Install the addon (clone into `Mod`, or symlink for development).
 2. Start FreeCAD and switch to the CAM workbench.
-3. Configure the server at **Edit -> Preferences -> CAM -> Smooth** and use
+3. Configure the server at **Edit -> Preferences -> CAM -> Loobric** and use
    **Test Connection**.
-4. Click the **Smooth** toolbar button and exercise the Sync / Machines / Audit
+4. Click the **Loobric** toolbar button and exercise the Sync / Machines / Audit
    tabs.
 
 ## Contributing
@@ -116,7 +116,7 @@ Run the test count yourself rather than trusting this number after changes.
 1. Follow TDD: write the test first.
 2. Keep new logic in the headless modules where possible, so it stays testable
    without FreeCAD.
-3. Verify round-trip fidelity (FreeCAD -> Smooth -> FreeCAD) for any mapping
+3. Verify round-trip fidelity (FreeCAD -> Loobric -> FreeCAD) for any mapping
    change; unknown keys must survive untouched.
 4. Update docstrings when assumptions change.
 5. Favor a functional style.
@@ -124,16 +124,16 @@ Run the test count yourself rather than trusting this number after changes.
 ## Troubleshooting
 
 **Addon not appearing in FreeCAD**
-- Check it is in the `Mod` directory and that `freecad/Smooth/` and
+- Check it is in the `Mod` directory and that `freecad/Loobric/` and
   `package.xml` are present.
 - Restart FreeCAD completely and check the Report view for load errors.
 
-**Smooth button missing from the toolbar**
+**Loobric button missing from the toolbar**
 - Make sure the CAM workbench is active.
 - Check the Python console / Report view for errors during initialization.
 
 **Connection errors**
-- Confirm the server URL and API key under CAM -> Smooth, and use Test
+- Confirm the server URL and API key under CAM -> Loobric, and use Test
   Connection.
 - Open the window's **Debug -> API log** to see the failing request and status.
 

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <ui version="4.0">
- <class>SmoothPreferences</class>
- <widget class="QWidget" name="SmoothPreferences">
+ <class>LoobricPreferences</class>
+ <widget class="QWidget" name="LoobricPreferences">
   <property name="geometry">
    <rect>
     <x>0</x>
@@ -11,13 +11,13 @@
    </rect>
   </property>
   <property name="windowTitle">
-   <string>Smooth Tool Sync</string>
+   <string>Loobric Tool Sync</string>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
    <item>
     <widget class="QLabel" name="titleLabel">
      <property name="text">
-      <string>&lt;h2&gt;Smooth Tool Synchronization&lt;/h2&gt;</string>
+      <string>&lt;h2&gt;Loobric Tool Synchronization&lt;/h2&gt;</string>
      </property>
      <property name="textFormat">
       <enum>Qt::RichText</enum>
@@ -27,7 +27,7 @@
    <item>
     <widget class="QLabel" name="descLabel">
      <property name="text">
-      <string>Configure connection to Smooth server for tool library synchronization.</string>
+      <string>Configure connection to Loobric server for tool library synchronization.</string>
      </property>
      <property name="wordWrap">
       <bool>true</bool>
@@ -53,7 +53,7 @@
    <item>
     <widget class="QLabel" name="urlLabel">
      <property name="text">
-      <string>Smooth Server URL:</string>
+      <string>Loobric Server URL:</string>
      </property>
     </widget>
    </item>

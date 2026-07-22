@@ -14,7 +14,7 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 def _set_path(canonical, path, field):
     """Fold a dotted ``path`` -> ``field`` into a nested canonical dict,
-    exactly as smooth-core's assert door does."""
+    exactly as loobric-server's assert door does."""
     node = canonical
     parts = path.split(".")
     for part in parts[:-1]:
@@ -26,8 +26,8 @@ def _set_path(canonical, path, field):
 class FakeServer:
     """In-memory stand-in for the sectioned tool-schema endpoints.
 
-    Mirrors :class:`freecad.Smooth.client.SmoothApi`'s sync-lane methods and
-    returns ``{internal, canonical, clients}`` records the way smooth-core's
+    Mirrors :class:`freecad.Loobric.client.LoobricApi`'s sync-lane methods and
+    returns ``{internal, canonical, clients}`` records the way loobric-server's
     ``_response`` does: create/get/list/put-section/assert/members all return
     the full record; delete returns ``{"deleted": id}``. Canonical values are
     provenance-tagged Fields (``{value, source}``); a set's per-tool numbers are

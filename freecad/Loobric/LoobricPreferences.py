@@ -3,9 +3,9 @@
 # SPDX-License-Identifier: MIT
 
 """
-Smooth FreeCAD Addon - Preference Page.
+Loobric FreeCAD Addon - Preference Page.
 
-Provides configuration UI for Smooth server connection in FreeCAD preferences.
+Provides configuration UI for Loobric server connection in FreeCAD preferences.
 This version loads the UI from a .ui file.
 """
 
@@ -17,13 +17,13 @@ import json
 import os
 
 
-class SmoothPreferencePage:
-    """Preference page for Smooth addon settings."""
+class LoobricPreferencePage:
+    """Preference page for Loobric addon settings."""
     
     def __init__(self):
         """Initialize the preference page by loading the .ui file."""
         # Load the .ui file
-        ui_path = os.path.join(os.path.dirname(__file__), "SmoothPreferences.ui")
+        ui_path = os.path.join(os.path.dirname(__file__), "LoobricPreferences.ui")
         loader = QtUiTools.QUiLoader()
         ui_file = QtCore.QFile(ui_path)
         ui_file.open(QtCore.QFile.ReadOnly)
@@ -66,7 +66,7 @@ class SmoothPreferencePage:
     
     def get_config_path(self):
         """Get path to config file."""
-        config_dir = Path.home() / ".config" / "smooth"
+        config_dir = Path.home() / ".config" / "loobric"
         config_dir.mkdir(parents=True, exist_ok=True)
         return config_dir / "freecad.json"
     
@@ -85,7 +85,7 @@ class SmoothPreferencePage:
             # Ensure checkbox state applies immediately
             #self.toggle_key_visibility(self.show_key_checkbox.isChecked())
         except Exception as e:
-            App.Console.PrintError(f"Failed to load Smooth settings: {e}\n")
+            App.Console.PrintError(f"Failed to load Loobric settings: {e}\n")
     
     def saveSettings(self):
         """Save settings to config file (called by FreeCAD)."""
@@ -101,11 +101,11 @@ class SmoothPreferencePage:
             with open(config_path, 'w') as f:
                 json.dump(config, f, indent=2)
             
-            App.Console.PrintMessage("Smooth settings saved\n")
+            App.Console.PrintMessage("Loobric settings saved\n")
             self.status_label.setText("✓ Settings saved successfully")
             
         except Exception as e:
-            App.Console.PrintError(f"Failed to save Smooth settings: {e}\n")
+            App.Console.PrintError(f"Failed to save Loobric settings: {e}\n")
             self.status_label.setText(f"✗ Failed to save settings: {str(e)}")
     
     def loadSettings(self):
@@ -113,8 +113,8 @@ class SmoothPreferencePage:
         self.load_settings()
     
     def test_connection(self):
-        """Test connection to the Smooth server via the same stdlib client the
-        sync uses (``SmoothApi.ping`` makes a cheap authenticated round-trip).
+        """Test connection to the Loobric server via the same stdlib client the
+        sync uses (``LoobricApi.ping`` makes a cheap authenticated round-trip).
         Avoids a dependency on `requests`, which FreeCAD's bundled Python may not
         have."""
         url = self._normalize_url(self.url_edit.text().strip())
@@ -125,16 +125,16 @@ class SmoothPreferencePage:
             return
 
         try:
-            from freecad.Smooth.client import SmoothApi, SmoothError
+            from freecad.Loobric.client import LoobricApi, LoobricError
         except ImportError:
-            from client import SmoothApi, SmoothError  # flat layout
+            from client import LoobricApi, LoobricError  # flat layout
 
         try:
-            SmoothApi(url, api_key).ping()
+            LoobricApi(url, api_key).ping()
             self.status_label.setText("✓ Connection successful!")
             App.Console.PrintMessage(
-                f"Successfully connected to Smooth server at {url}\n")
-        except SmoothError as e:
+                f"Successfully connected to Loobric server at {url}\n")
+        except LoobricError as e:
             self.status_label.setText("✗ Connection failed - cannot reach server")
             App.Console.PrintError(f"Connection test failed for {url}: {e}\n")
         except Exception as e:

@@ -7,7 +7,7 @@ Tests for the sectioned-schema mapping (docs/TOOL_SCHEMA.md).
 
 The contract under test:
 - .fctb -> ToolInstanceRecord sections -> .fctb is LOSSLESS apart from the
-  additive 'smooth' identity key: the full document rides verbatim in
+  additive 'loobric' identity key: the full document rides verbatim in
   clients.freecad.data.fctb, so unknown keys (FreeCAD's F&S 'presets') survive.
 - the FreeCAD type/dimensions are surfaced as canonical (path, value) ASSERTS,
   not fabricated into a flat field; geometry.shape is correct across SHAPE_DEFS.
@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from freecad.Smooth.mapping import (
+from freecad.Loobric.mapping import (
     record_to_instance_sections, instance_to_fctb, catalog_to_fctb,
     fctl_to_set_sections, set_to_fctl,
     fctb_record_id, fctl_record_id,
@@ -114,13 +114,13 @@ def test_parse_and_format_quantity():
 @pytest.mark.parametrize("path", ALL_BITS, ids=lambda p: p.stem)
 def test_every_fixture_bit_round_trips_lossless(path):
     """fctb -> sections -> (fake server record) -> fctb returns the identical
-    document plus the additive smooth key. Covers every fixture shape type."""
+    document plus the additive loobric key. Covers every fixture shape type."""
     original = json.loads(path.read_text())
     sections = record_to_instance_sections(original)
 
     record = fake_instance(sections)
     regenerated = instance_to_fctb(record)
-    assert regenerated.pop("smooth") == {"record_id": "rec-1", "version": 1}
+    assert regenerated.pop("loobric") == {"record_id": "rec-1", "version": 1}
     assert regenerated == original
 
 
@@ -185,14 +185,14 @@ def test_shape_guessed_from_name_when_file_silent():
 
 
 @pytest.mark.unit
-def test_smooth_identity_key_is_read_then_stripped():
+def test_loobric_identity_key_is_read_then_stripped():
     """A re-exported bit's server id is read for UPDATE-vs-CREATE; the stored
     client data is clean of the plumbing key."""
     doc = json.loads((BITS / "drill_5.0mm.fctb").read_text())
-    doc["smooth"] = {"record_id": "rec-99", "version": 3}
+    doc["loobric"] = {"record_id": "rec-99", "version": 3}
     assert fctb_record_id(doc) == "rec-99"
     sections = record_to_instance_sections(doc)
-    assert "smooth" not in sections.data["fctb"]
+    assert "loobric" not in sections.data["fctb"]
 
 
 @pytest.mark.unit
@@ -232,7 +232,7 @@ def test_record_without_freecad_section_gets_minimal_doc():
     assert doc["shape-type"] == "Endmill"
     assert doc["parameter"]["Diameter"] == "6.35 mm"
     assert doc["parameter"]["Flutes"] == 2
-    assert doc["smooth"]["record_id"] == "rec-7"
+    assert doc["loobric"]["record_id"] == "rec-7"
 
 
 # -- Shape correctness across SHAPE_DEFS --------------------------------------
@@ -242,7 +242,7 @@ def test_synthesized_tool_uses_authoritative_shape_file_and_type():
     """A synthesized bit (no base doc) must name the exact shape FILE and TYPE
     FreeCAD's models define — type+schema resolve from the file, so a wrong one
     collapses to a generic endmill. Covers the irregular names."""
-    from freecad.Smooth.mapping import SHAPE_DEFS
+    from freecad.Loobric.mapping import SHAPE_DEFS
     cases = {"vbit": ("v-bit.fcstd", "VBit"),
              "threadmill": ("thread-mill.fcstd", "ThreadMill"),
              "taperedballnose": ("taperedballnose.fcstd", "TaperedBallNose"),
@@ -267,7 +267,7 @@ def test_synthesized_tool_uses_authoritative_shape_file_and_type():
 @pytest.mark.unit
 def test_all_freecad_shapes_are_offered():
     """The picker covers every shape model FreeCAD ships."""
-    from freecad.Smooth.mapping import FREECAD_SHAPES
+    from freecad.Loobric.mapping import FREECAD_SHAPES
     assert set(FREECAD_SHAPES) >= {
         "endmill", "ballend", "bullnose", "chamfer", "dovetail", "drill",
         "probe", "radius", "reamer", "slittingsaw", "tap", "taperedballnose",
@@ -361,7 +361,7 @@ def _instance_from_catalog(record_id="rec-9", catalog_id="cat-1", name=None):
 @pytest.mark.unit
 def test_catalog_to_fctb_carries_catalog_geometry_and_stamps_instance_id():
     """The synthesized .fctb takes its shape + dimensions from the CATALOG's
-    nominal geometry, but its identity (smooth.record_id) from the new INSTANCE
+    nominal geometry, but its identity (loobric.record_id) from the new INSTANCE
     — never the catalog id."""
     catalog = _catalog_record()
     instance = _instance_from_catalog(record_id="rec-9", catalog_id="cat-1")
@@ -372,7 +372,7 @@ def test_catalog_to_fctb_carries_catalog_geometry_and_stamps_instance_id():
     assert doc["parameter"]["Flutes"] == 2
     assert doc["name"] == '1/4" Downcut'
     # the local tool tracks the INSTANCE, not the catalog
-    assert doc["smooth"]["record_id"] == "rec-9"
+    assert doc["loobric"]["record_id"] == "rec-9"
 
 
 @pytest.mark.unit
@@ -385,7 +385,7 @@ def test_catalog_to_fctb_respects_instance_name_override():
     assert doc["name"] == "Special lot 7"
     assert doc["shape"] == "drill.fcstd"          # geometry still from catalog
     assert doc["parameter"]["Diameter"] == "5.00 mm"
-    assert doc["smooth"]["record_id"] == "rec-2"
+    assert doc["loobric"]["record_id"] == "rec-2"
 
 
 @pytest.mark.unit
@@ -422,7 +422,7 @@ def test_fctl_round_trip_preserves_numbers_and_order():
     path_by_id = {v: k for k, v in id_by_path.items()}
     regenerated, unresolved = set_to_fctl(record, path_by_id)
     assert unresolved == []
-    assert regenerated.pop("smooth") == {"record_id": "set-1", "version": 1}
+    assert regenerated.pop("loobric") == {"record_id": "set-1", "version": 1}
     assert regenerated == fctl
 
 
@@ -489,7 +489,7 @@ def test_set_member_without_known_path_is_reported():
 @pytest.mark.unit
 def test_fctl_identity_key_round_trips():
     fctl = {"label": "x", "version": 1, "tools": [],
-            "smooth": {"record_id": "set-42", "version": 7}}
+            "loobric": {"record_id": "set-42", "version": 7}}
     assert fctl_record_id(fctl) == "set-42"
     sections = fctl_to_set_sections(fctl, {})
-    assert "smooth" not in sections.data
+    assert "loobric" not in sections.data

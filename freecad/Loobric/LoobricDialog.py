@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 
 """
-Smooth — the tabbed desktop window.
+Loobric — the tabbed desktop window.
 
 A deliberately small shell of three tabs over a single shared API client (so all
 HTTP traffic lands in one call log): **Sync** (the one CAM surface — plan/apply
@@ -14,7 +14,7 @@ sectioned-record JSON inspection and a live API log are demoted behind a
 **Debug** menu. The window is modeless so FreeCAD stays usable beside it.
 
 All behavior lives in the headless-tested modules (client.py, sync.py,
-mapping.py) and the pure view-model (viewmodel.py) consumed by SmoothTabs.py;
+mapping.py) and the pure view-model (viewmodel.py) consumed by LoobricTabs.py;
 this file is the shell that wires them up.
 """
 import json
@@ -24,29 +24,29 @@ from typing import Dict
 import FreeCAD as App
 from PySide import QtGui, QtCore
 
-from . import SmoothTabs
-from .client import SmoothApi, SmoothError
+from . import LoobricTabs
+from .client import LoobricApi, LoobricError
 
 
-class SmoothConfig:
-    """Configuration in ~/.config/smooth/freecad.json (v1-compatible)."""
+class LoobricConfig:
+    """Configuration in ~/.config/loobric/freecad.json (v1-compatible)."""
 
     @staticmethod
     def get_config_path() -> Path:
-        config_dir = Path.home() / ".config" / "smooth"
+        config_dir = Path.home() / ".config" / "loobric"
         config_dir.mkdir(parents=True, exist_ok=True)
         return config_dir / "freecad.json"
 
     @staticmethod
     def load() -> Dict:
         default = {"api_url": "https://api.loobric.com", "api_key": ""}
-        path = SmoothConfig.get_config_path()
+        path = LoobricConfig.get_config_path()
         if path.exists():
             try:
                 with open(path) as f:
                     default.update(json.load(f))
             except (OSError, ValueError) as e:
-                App.Console.PrintWarning(f"Smooth: bad config file: {e}\n")
+                App.Console.PrintWarning(f"Loobric: bad config file: {e}\n")
         url = default["api_url"].rstrip("/")
         if url.endswith("/api"):
             url = url[:-4]
@@ -55,7 +55,7 @@ class SmoothConfig:
 
     @staticmethod
     def save(config: Dict) -> None:
-        with open(SmoothConfig.get_config_path(), "w") as f:
+        with open(LoobricConfig.get_config_path(), "w") as f:
             json.dump(config, f, indent=2)
 
 
@@ -69,15 +69,15 @@ def get_tools_dir() -> Path:
     return asset_path / "Tools"
 
 
-class SmoothWindow(QtGui.QDialog):
-    """Tabbed Smooth window. Opens on the Sync tab; other tabs lazy-load when
+class LoobricWindow(QtGui.QDialog):
+    """Tabbed Loobric window. Opens on the Sync tab; other tabs lazy-load when
     first shown. One client is shared by every tab. Modeless (see the command),
     so FreeCAD stays usable alongside it."""
 
     def __init__(self):
         super().__init__()
-        self.config = SmoothConfig.load()
-        self.client = SmoothApi(self.config["api_url"],
+        self.config = LoobricConfig.load()
+        self.client = LoobricApi(self.config["api_url"],
                                 self.config.get("api_key", ""))
         self._api_panel = None
         self._build_ui()
@@ -85,7 +85,7 @@ class SmoothWindow(QtGui.QDialog):
     # -- UI ---------------------------------------------------------------
 
     def _build_ui(self):
-        self.setWindowTitle("Smooth")
+        self.setWindowTitle("Loobric")
         self.resize(820, 620)
         layout = QtGui.QVBoxLayout(self)
 
@@ -113,13 +113,13 @@ class SmoothWindow(QtGui.QDialog):
         self.tabs = QtGui.QTabWidget()
         tools_dir = str(get_tools_dir())
         # The one CAM surface; binding lives on Machines; Audit is read-only.
-        self.sync_tab = SmoothTabs.SyncTab(self, self.client, tools_dir)
-        self.catalog_tab = SmoothTabs.CatalogTab(self, self.client, tools_dir)
+        self.sync_tab = LoobricTabs.SyncTab(self, self.client, tools_dir)
+        self.catalog_tab = LoobricTabs.CatalogTab(self, self.client, tools_dir)
         self._tab_list = [
             self.sync_tab,
             self.catalog_tab,
-            SmoothTabs.MachinesTab(self, self.client),
-            SmoothTabs.AuditTab(self, self.client),
+            LoobricTabs.MachinesTab(self, self.client),
+            LoobricTabs.AuditTab(self, self.client),
         ]
         for tab in self._tab_list:
             self.tabs.addTab(tab, tab.TITLE)
@@ -168,7 +168,7 @@ class SmoothWindow(QtGui.QDialog):
         try:
             self.client.ping()
             self.conn_label.setText("connected")
-        except SmoothError as e:
+        except LoobricError as e:
             self.conn_label.setText("not connected")
             self.status(f"Cannot reach server: {e}")
         self.refresh_api_log()
@@ -190,7 +190,7 @@ class SmoothWindow(QtGui.QDialog):
 
     def status(self, message):
         self.status_label.setText(message)
-        App.Console.PrintMessage("Smooth: %s\n" % message)
+        App.Console.PrintMessage("Loobric: %s\n" % message)
         QtGui.QApplication.processEvents()
 
     def inspect_selected(self):
@@ -199,13 +199,13 @@ class SmoothWindow(QtGui.QDialog):
         if not isinstance(record, dict):
             self.status("Select a row to inspect its record.")
             return
-        title = SmoothTabs.record_name(record) if record.get("internal") \
+        title = LoobricTabs.record_name(record) if record.get("internal") \
             else (record.get("id") or "item")
-        SmoothTabs.RecordInspector(record, parent=self, title=str(title)).exec_()
+        LoobricTabs.RecordInspector(record, parent=self, title=str(title)).exec_()
 
     def show_api_log(self):
         if self._api_panel is None:
-            self._api_panel = SmoothTabs.ApiLogPanel(self.client, parent=self)
+            self._api_panel = LoobricTabs.ApiLogPanel(self.client, parent=self)
             self._api_panel.finished.connect(self._api_panel_closed)
         self._api_panel.show()
         self._api_panel.raise_()
@@ -219,5 +219,5 @@ class SmoothWindow(QtGui.QDialog):
             self._api_panel.refresh()
 
 
-# Back-compat alias: the toolbar command historically opened SmoothSyncDialog.
-SmoothSyncDialog = SmoothWindow
+# Back-compat alias: the toolbar command historically opened LoobricSyncDialog.
+LoobricSyncDialog = LoobricWindow

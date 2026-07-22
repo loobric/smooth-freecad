@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 
 """
-Mapping between FreeCAD file formats and the Smooth **sectioned** tool schema
+Mapping between FreeCAD file formats and the Loobric **sectioned** tool schema
 (docs/TOOL_SCHEMA.md). Pure functions, no FreeCAD imports — fully testable
 headless.
 
@@ -26,7 +26,7 @@ This module's job is the FreeCAD <-> sections translation:
   ``members`` (a set's numbering is shared truth, §7.4); the FreeCAD label and
   format version stay in ``clients.freecad.data``.
 - Identity: after first contact the server's ``internal.id`` is persisted
-  client-side as the additive ``smooth.record_id`` key in the ``.fctb``/``.fctl``
+  client-side as the additive ``loobric.record_id`` key in the ``.fctb``/``.fctl``
   (older readers ignore it). ``client_item_id`` (the ``.fctb`` id / ``.fctl``
   label) is the re-adoption fallback the server holds.
 
@@ -198,8 +198,8 @@ def fctb_record_id(fctb_doc):
     """The server record id a prior export wrote into the .fctb, or None.
 
     This is the client's private UPDATE-vs-CREATE bookkeeping (the additive
-    'smooth' key), not part of any wire section."""
-    return ((fctb_doc or {}).get("smooth") or {}).get("record_id")
+    'loobric' key), not part of any wire section."""
+    return ((fctb_doc or {}).get("loobric") or {}).get("record_id")
 
 
 def record_to_instance_sections(fctb_doc, shape=None, client_item_id=None):
@@ -209,7 +209,7 @@ def record_to_instance_sections(fctb_doc, shape=None, client_item_id=None):
     Returns an ``InstanceSections(data, client_item_id, asserts)``:
 
     - ``data`` = ``{"fctb": <doc>}`` — the full original document, lossless and
-      opaque, minus the additive 'smooth' identity key (plumbing, not tool
+      opaque, minus the additive 'loobric' identity key (plumbing, not tool
       data). Unknown keys (presets, attribute, …) ride along untouched.
     - ``client_item_id`` = the .fctb ``id`` (or the caller-supplied filename
       stem) — the envelope's re-adoption fallback.
@@ -224,7 +224,7 @@ def record_to_instance_sections(fctb_doc, shape=None, client_item_id=None):
     stamped type" path.
     """
     doc = copy.deepcopy(fctb_doc)
-    doc.pop("smooth", None)
+    doc.pop("loobric", None)
 
     name = doc.get("name") or doc.get("id") or "unnamed tool"
     chosen_shape = shape or fctb_shape(doc) or guess_shape_from_name(name)
@@ -256,7 +256,7 @@ def instance_to_fctb(record):
     - Server-canonical edits overlay: ``name`` always; each ``geometry.*``
       parameter only when the canonical value actually differs from the
       original string (lossless rule — formatting never churns).
-    - The additive ``smooth`` key records ``internal.id`` for the next export.
+    - The additive ``loobric`` key records ``internal.id`` for the next export.
     """
     internal = record.get("internal") or {}
     canonical = record.get("canonical") or {}
@@ -310,7 +310,7 @@ def instance_to_fctb(record):
         if value is not None and params.get(param) != value:
             params[param] = int(value)
 
-    doc["smooth"] = {"record_id": internal.get("id"),
+    doc["loobric"] = {"record_id": internal.get("id"),
                      "version": internal.get("version")}
     return doc
 
@@ -331,7 +331,7 @@ def catalog_to_fctb(catalog_record, instance_record):
       instance.
 
     Built by reusing :func:`instance_to_fctb` on a merged record: the instance's
-    ``internal`` (so ``smooth.record_id`` is the NEW instance's id), the catalog's
+    ``internal`` (so ``loobric.record_id`` is the NEW instance's id), the catalog's
     canonical geometry (the nominal shape + dimensions), and the instance's own
     name when it set one (a ``--name`` override) else the catalog's name. Empty
     ``clients`` — there is no prior .fctb to preserve. Pure; inputs untouched."""
@@ -366,7 +366,7 @@ SetSections = namedtuple(
 
 def fctl_record_id(fctl_doc):
     """The server ToolSet id a prior export wrote into the .fctl, or None."""
-    return ((fctl_doc or {}).get("smooth") or {}).get("record_id")
+    return ((fctl_doc or {}).get("loobric") or {}).get("record_id")
 
 
 def fctl_to_set_sections(fctl_doc, record_id_by_path, client_item_id=None):
@@ -391,7 +391,7 @@ def fctl_to_set_sections(fctl_doc, record_id_by_path, client_item_id=None):
       silently dropped.
     """
     doc = copy.deepcopy(fctl_doc)
-    doc.pop("smooth", None)
+    doc.pop("loobric", None)
     label = doc.get("label") or "library"
 
     members = []
@@ -421,7 +421,7 @@ def set_to_fctl(toolset_record, path_by_record_id):
       label stashed in ``clients.freecad.data``.
     - Members whose record has no known ``.fctb`` path are returned in
       ``unresolved`` for the caller to export first — never silently dropped.
-    - The additive ``smooth`` key records ``internal.id`` for the next export.
+    - The additive ``loobric`` key records ``internal.id`` for the next export.
     """
     internal = toolset_record.get("internal") or {}
     canonical = toolset_record.get("canonical") or {}
@@ -455,6 +455,6 @@ def set_to_fctl(toolset_record, path_by_record_id):
         "tools": tools,
         "version": data.get("version", 1),
     }
-    doc["smooth"] = {"record_id": internal.get("id"),
+    doc["loobric"] = {"record_id": internal.get("id"),
                      "version": internal.get("version")}
     return doc, unresolved

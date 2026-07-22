@@ -3,11 +3,11 @@
 # SPDX-License-Identifier: MIT
 
 """
-Plan / apply sync orchestration — reconcile FreeCAD tool dirs with a Smooth
+Plan / apply sync orchestration — reconcile FreeCAD tool dirs with a Loobric
 server speaking the **sectioned** tool schema (docs/TOOL_SCHEMA.md).
 
-Pure logic over the filesystem and an injected client (``SmoothApi``); no
-FreeCAD imports, fully testable headless. The dialog (SmoothDialog.py) renders the
+Pure logic over the filesystem and an injected client (``LoobricApi``); no
+FreeCAD imports, fully testable headless. The dialog (LoobricDialog.py) renders the
 plan this module computes and feeds back the per-row decisions.
 
 The model in one line: a ``.fctb`` is a **ToolInstanceRecord**, a ``.fctl`` is a
@@ -15,15 +15,15 @@ The model in one line: a ``.fctb`` is a **ToolInstanceRecord**, a ``.fctl`` is a
 ``clients.freecad`` section (the lossless document) and *asserts* the canonical
 facts its scope permits (name, geometry.shape, dimensions, a set's name and
 members). The server's ``internal.id`` is persisted client-side as the additive
-``smooth.record_id`` key — the same identity mechanism as before, now uniform
+``loobric.record_id`` key — the same identity mechanism as before, now uniform
 across bits and libraries.
 
 Identity rules (the production lesson — never create duplicates):
 - A bit/library exported before carries its server id in the additive
-  ``smooth`` key; re-sync writes that id's sections, never blind-creates.
+  ``loobric`` key; re-sync writes that id's sections, never blind-creates.
 - After a create the id is written back immediately, so even a crashed sync
   never double-creates.
-- If an editor dropped the ``smooth`` key (FreeCAD's ToolBit/library editors
+- If an editor dropped the ``loobric`` key (FreeCAD's ToolBit/library editors
   drop unknown top-level keys on save), re-adopt: bits by the verbatim ``.fctb``
   id (held server-side as ``client_item_id``), then by filename; libraries by
   the sync journal, then by recorded ``client_item_id``. NEVER by name.
@@ -33,7 +33,7 @@ import json
 import os
 
 from . import mapping
-from .client import SmoothError
+from .client import LoobricError
 
 
 def _read_json(path):
@@ -49,18 +49,18 @@ def _write_json(path, doc):
 
 
 def _writeback_identity(path, server_id, version):
-    """Inject/refresh the additive 'smooth' key in a tool file.
+    """Inject/refresh the additive 'loobric' key in a tool file.
 
     Uniform across bits and libraries: both store the server id under
-    ``smooth.record_id`` (the 2026-06 sectioned-schema unification)."""
+    ``loobric.record_id`` (the 2026-06 sectioned-schema unification)."""
     doc = _read_json(path)
-    doc["smooth"] = {"record_id": server_id, "version": version}
+    doc["loobric"] = {"record_id": server_id, "version": version}
     _write_json(path, doc)
 
 
-def _sans_smooth(doc):
+def _sans_loobric(doc):
     """Copy of a tool document without the identity plumbing key."""
-    return {k: v for k, v in (doc or {}).items() if k != "smooth"}
+    return {k: v for k, v in (doc or {}).items() if k != "loobric"}
 
 
 def _slug(name):
@@ -195,10 +195,10 @@ def _canonical_value(value):
 
 
 def _flatten(doc, prefix=""):
-    """Dotted-key flattening for field-level diffs ('smooth' excluded)."""
+    """Dotted-key flattening for field-level diffs ('loobric' excluded)."""
     out = {}
     for k, v in (doc or {}).items():
-        if k == "smooth":
+        if k == "loobric":
             continue
         key = prefix + k
         if isinstance(v, dict):
@@ -252,7 +252,7 @@ def _membership_delta(local_doc, regenerated):
 # The sync journal: this install's memory of what it has synced
 # ---------------------------------------------------------------------------
 
-STATE_BASENAME = ".smooth_state.json"
+STATE_BASENAME = ".loobric_state.json"
 
 
 def _load_sync_state(tools_dir):
@@ -767,7 +767,7 @@ def apply_sync(tools_dir, client, plan, decisions, shapes=None, log=lambda msg: 
                                     actor=mapping.CLIENT_NAME)
         _writeback_identity(item["path"], rid, _record_version(result))
         state["tool_sets"][rid] = item["basename"]
-        state["set_snapshots"][rid] = _sans_smooth(_read_json(item["path"]))
+        state["set_snapshots"][rid] = _sans_loobric(_read_json(item["path"]))
         summary["pushed"] += 1
         log("uploaded %s" % item["basename"])
 
@@ -784,7 +784,7 @@ def apply_sync(tools_dir, client, plan, decisions, shapes=None, log=lambda msg: 
             lib_dir, _slug(_record_name(record) or "library") + ".fctl")
         _write_json(path, regenerated)
         state["tool_sets"][rid] = os.path.basename(path)
-        state["set_snapshots"][rid] = _sans_smooth(regenerated)
+        state["set_snapshots"][rid] = _sans_loobric(regenerated)
         summary["pulled"] += 1
         log("downloaded %s" % os.path.basename(path))
 
@@ -836,7 +836,7 @@ def apply_sync(tools_dir, client, plan, decisions, shapes=None, log=lambda msg: 
                 push_bit(item) if decision == "push" else pull_bit(item)
             else:
                 push_library(item) if decision == "push" else pull_library(item)
-        except (SyncApplyError, SmoothError) as e:
+        except (SyncApplyError, LoobricError) as e:
             summary["errors"].append("%s: %s" % (item["name"], e))
             log("  ! %s: %s" % (item["name"], e))
 

@@ -4,7 +4,7 @@
 # Copyright (c) 2025 sliptonic
 # SPDX-License-Identifier: MIT
 #
-# loobric.py is THE reference Python client for Smooth Core: a single,
+# loobric.py is THE reference Python client for Loobric Core: a single,
 # stdlib-only file that exercises every public API operation. It is licensed MIT
 # (not AGPL like the server it lives beside) so MIT clients may vendor or import
 # it. Other Python clients (FreeCAD, future Fusion) reuse this rather than
@@ -14,7 +14,7 @@
 # errors, no printing) usable via `import loobric`, and a thin CLI shell
 # (argparse + formatting) usable via `python loobric.py <verb>`.
 """
-Loobric CLI Utility - Manage authentication and API keys for Smooth Core
+Loobric CLI Utility - Manage authentication and API keys for Loobric Core
 
 Usage:
     # Interactive login (saves session)
@@ -178,7 +178,7 @@ def make_request(
     raw_body: Optional[bytes] = None,
     content_type: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Make an HTTP request to the Smooth API and return parsed JSON.
+    """Make an HTTP request to the Loobric API and return parsed JSON.
 
     The transport for both the CLI and the `Client` library. It NEVER prints or
     exits — on failure it raises a `LoobricError` subclass (`NotFound`,
@@ -209,7 +209,7 @@ def make_request(
         headers["Content-Type"] = content_type
 
     # Prefer API key over session cookie. With neither, send anyway and let the
-    # server decide: a solo-mode server (SMOOTH_SOLO=1) accepts it; a multi-user
+    # server decide: a solo-mode server (LOOBRIC_SOLO=1) accepts it; a multi-user
     # server returns 401. The client must not pre-judge auth.
     key = api_key if api_key is not None else API_KEY
     cookie = session_cookie if session_cookie is not None else SESSION_COOKIE
@@ -271,7 +271,7 @@ def make_request(
 # ---------------------------------------------------------------------------
 
 class Client:
-    """A reusable Smooth API client. Returns data; raises LoobricError."""
+    """A reusable Loobric API client. Returns data; raises LoobricError."""
 
     def __init__(self, base_url: Optional[str] = None, api_key: Optional[str] = None,
                  session_cookie: Optional[str] = None, transport=None):

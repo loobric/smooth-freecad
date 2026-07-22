@@ -12,7 +12,7 @@ surfaces cleanly rather than as a stack trace.
 """
 import pytest
 
-from freecad.Smooth import loobric
+from freecad.Loobric import loobric
 
 
 @pytest.mark.unit
@@ -23,7 +23,7 @@ def test_list_users_hits_admin_users_endpoint():
         captured.append((method, endpoint))
         return {"total": 2, "users": [{"email": "a@x"}, {"email": "b@x"}]}
 
-    client = loobric.Client("https://smooth.example", api_key="k", transport=transport)
+    client = loobric.Client("https://loobric.example", api_key="k", transport=transport)
     result = client.list_users()
 
     assert captured == [("GET", "/admin/users")]
@@ -36,6 +36,6 @@ def test_list_users_propagates_notfound_on_older_server():
     def transport(method, endpoint, **kw):
         raise loobric.NotFound(404, "no such endpoint")
 
-    client = loobric.Client("https://smooth.example", api_key="k", transport=transport)
+    client = loobric.Client("https://loobric.example", api_key="k", transport=transport)
     with pytest.raises(loobric.NotFound):
         client.list_users()

@@ -3,8 +3,8 @@
 # SPDX-License-Identifier: MIT
 
 """
-The Smooth GUI **view-model** — pure functions that answer "what should the
-window show", computed once and rendered by the widgets in SmoothTabs.py. **No
+The Loobric GUI **view-model** — pure functions that answer "what should the
+window show", computed once and rendered by the widgets in LoobricTabs.py. **No
 FreeCAD or PySide imports**, so it is unit-testable headless.
 
 Three groups:

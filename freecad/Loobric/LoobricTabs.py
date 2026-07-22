@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 
 """
-The three tabs of the Smooth window (SmoothDialog.py), plus shared widgets.
+The three tabs of the Loobric window (LoobricDialog.py), plus shared widgets.
 
 The information architecture is deliberately small (reboot Phase 3):
 
@@ -30,7 +30,7 @@ import FreeCAD as App
 from PySide import QtGui, QtCore
 
 from . import sync, mapping, viewmodel
-from .client import SmoothError
+from .client import LoobricError
 from .viewmodel import (field_value, canonical as _canonical, short_id,
                         record_name, instance_shape, instance_diameter,
                         fmt_dia as _fmt_dia, cascade_choice, SKIP, LOCAL_WINS,
@@ -82,7 +82,7 @@ class ApiLogPanel(QtGui.QDialog):
     def __init__(self, client, parent=None):
         super().__init__(parent)
         self.client = client
-        self.setWindowTitle("Smooth API log")
+        self.setWindowTitle("Loobric API log")
         self.resize(620, 360)
         layout = QtGui.QVBoxLayout(self)
         self.view = QtGui.QPlainTextEdit()
@@ -161,12 +161,12 @@ class _Tab(QtGui.QWidget):
             return None
         try:
             result = fn()
-        except SmoothError as e:
+        except LoobricError as e:
             self.window.refresh_api_log()
             if getattr(e, "status", None) == 409 and on_conflict is not None:
                 on_conflict(e)
                 return None
-            QtGui.QMessageBox.warning(self, "Smooth", str(e))
+            QtGui.QMessageBox.warning(self, "Loobric", str(e))
             self._notify("✗ %s" % e)
             return None
         self.window.refresh_api_log()
@@ -345,7 +345,7 @@ class SyncTab(_Tab):
         layout.addLayout(buttons)
 
     def _append(self, message):
-        App.Console.PrintMessage("Smooth: %s\n" % message)
+        App.Console.PrintMessage("Loobric: %s\n" % message)
         QtGui.QApplication.processEvents()
 
     def _toggle_attention(self, on):
@@ -358,7 +358,7 @@ class SyncTab(_Tab):
         try:
             self.plan = sync.plan_sync(self.tools_dir, self.client,
                                        log=self._append)
-        except SmoothError as e:
+        except LoobricError as e:
             self.window.refresh_api_log()
             self._notify("✗ planning failed: %s" % e)
             self._append("Planning failed: %s" % e)
@@ -609,9 +609,9 @@ class SyncTab(_Tab):
         sid = record["internal"]["id"]
         try:
             machines = self.client.list_machines()
-        except SmoothError as e:
+        except LoobricError as e:
             self.window.refresh_api_log()
-            QtGui.QMessageBox.warning(self, "Smooth", str(e))
+            QtGui.QMessageBox.warning(self, "Loobric", str(e))
             return
         self.window.refresh_api_log()
         if not machines:
@@ -662,14 +662,14 @@ class SyncTab(_Tab):
         try:
             summary = sync.apply_sync(self.tools_dir, self.client, self.plan,
                                       {item["key"]: decision})
-        except SmoothError as e:
+        except LoobricError as e:
             self.window.refresh_api_log()
-            QtGui.QMessageBox.warning(self, "Smooth", str(e))
+            QtGui.QMessageBox.warning(self, "Loobric", str(e))
             self._notify("✗ %s" % e)
             return
         self.window.refresh_api_log()
         if summary["errors"]:
-            QtGui.QMessageBox.warning(self, "Smooth", "\n".join(summary["errors"]))
+            QtGui.QMessageBox.warning(self, "Loobric", "\n".join(summary["errors"]))
         self._notify("Resolved '%s' — %d uploaded, %d downloaded."
                      % (item.get("name"), summary["pushed"], summary["pulled"]))
         self.refresh()
@@ -695,7 +695,7 @@ class SyncTab(_Tab):
             summary = sync.apply_sync(self.tools_dir, self.client, self.plan,
                                       decisions, shapes=self._collect_shapes(),
                                       log=self._append)
-        except SmoothError as e:
+        except LoobricError as e:
             self.window.refresh_api_log()
             self._append("Apply failed: %s" % e)
             self._notify("✗ apply failed: %s" % e)
@@ -792,7 +792,7 @@ class MachinesTab(_Tab):
             entries = self.client.list_entries()
             instances = self.client.list_instances()
             proposals = self.client.list_inbox()
-        except SmoothError as e:
+        except LoobricError as e:
             self.window.refresh_api_log()
             self.summary.setText("✗ %s" % e)
             return
@@ -875,9 +875,9 @@ class MachinesTab(_Tab):
             return
         try:
             instances = self.client.list_instances()
-        except SmoothError as e:
+        except LoobricError as e:
             self.window.refresh_api_log()
-            QtGui.QMessageBox.warning(self, "Smooth", str(e))
+            QtGui.QMessageBox.warning(self, "Loobric", str(e))
             return
         self.window.refresh_api_log()
         if not instances:
@@ -1004,7 +1004,7 @@ class AuditTab(_Tab):
         self.tree.clear()
         try:
             logs = self.client.list_audit(limit=50)
-        except SmoothError as e:
+        except LoobricError as e:
             self.window.refresh_api_log()
             self._notify("✗ %s" % e)
             return
@@ -1084,7 +1084,7 @@ class CatalogTab(_Tab):
         self.tree.clear()
         try:
             records = self.client.list_catalogs()
-        except SmoothError as e:
+        except LoobricError as e:
             self.window.refresh_api_log()
             self._notify("✗ %s" % e)
             return
@@ -1136,10 +1136,10 @@ class CatalogTab(_Tab):
         try:
             result = sync.create_tool_from_catalog(
                 self._tools_dir(), self.client, record, name=None,
-                log=lambda m: App.Console.PrintMessage("Smooth: %s\n" % m))
-        except SmoothError as e:
+                log=lambda m: App.Console.PrintMessage("Loobric: %s\n" % m))
+        except LoobricError as e:
             self.window.refresh_api_log()
-            QtGui.QMessageBox.warning(self, "Smooth", str(e))
+            QtGui.QMessageBox.warning(self, "Loobric", str(e))
             self._notify("✗ %s" % e)
             return
         self.window.refresh_api_log()

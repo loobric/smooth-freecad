@@ -12,7 +12,7 @@ rest untouched.
 """
 import pytest
 
-from freecad.Smooth.viewmodel import (
+from freecad.Loobric.viewmodel import (
     cascade_choice, SKIP, LOCAL_WINS, SERVER_WINS,
     field_value, field_source, record_name, instance_shape, instance_diameter,
     short_id, fmt_dia)

@@ -1,17 +1,17 @@
 # Changelog
 
-All notable changes to **smooth-freecad** (the FreeCAD CAM client for Smooth) are
+All notable changes to **loobric-freecad** (the FreeCAD CAM client for Loobric) are
 recorded here. This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [0.3.2] — 2026-06-29
 
 ### Added
 - **`loobric list-users` — the admin account roster.** A reference-client verb
-  (and `Client.list_users()` library method) onto smooth-core's new
+  (and `Client.list_users()` library method) onto loobric-server's new
   `GET /api/v1/admin/users`: how many accounts exist and who they are (email,
   role, flags, API-key count, created date), newest first. Admin-only on the
   server; an older server with no such endpoint reports it plainly. No secrets
-  are shown — never a password hash or key material. Needs smooth-core ≥ 0.3.5.
+  are shown — never a password hash or key material. Needs loobric-server ≥ 0.3.5.
 
 ## [0.3.1] — 2026-06-23
 
@@ -24,7 +24,7 @@ recorded here. This project adheres to [Semantic Versioning](https://semver.org/
 ## [0.3.0] — 2026-06-21
 
 The **M2** client: browse the server's catalog records and create tools from
-them. Tracks smooth-core 0.2.0.
+them. Tracks loobric-server 0.2.0.
 
 ### Added
 - **Catalog tab** — browse `ToolCatalogRecord`s (name, manufacturer, product
@@ -38,7 +38,7 @@ them. Tracks smooth-core 0.2.0.
   library to see the new tool in the editor.
 
 ### Changed
-- **Re-vendored `loobric.py`** from smooth-core 0.2.0 (the M2 reference client):
+- **Re-vendored `loobric.py`** from loobric-server 0.2.0 (the M2 reference client):
   `create_instance_from_catalog`, `add_to_set` / `remove_from_set`,
   `show-tool-set`, `server_version`. Backwards-compatible — every existing call
   site is unchanged.
@@ -47,14 +47,14 @@ them. Tracks smooth-core 0.2.0.
 
 ### Fixed
 - **The addon was not recognized after a manual clone / Addon Manager install**
-  ([#4](https://github.com/loobric/smooth-freecad/issues/4),
-  [#2](https://github.com/loobric/smooth-freecad/issues/2)). The namespace
+  ([#4](https://github.com/loobric/loobric-freecad/issues/4),
+  [#2](https://github.com/loobric/loobric-freecad/issues/2)). The namespace
   package declaration `freecad/__init__.py` was missing, so FreeCAD never merged
-  `freecad.Smooth` into its `freecad` namespace and `init_gui.py` never ran (no
-  Smooth button, no preferences). Added it, and fixed `init_gui.py` to import its
-  siblings via the package namespace (`from freecad.Smooth import …`) instead of
-  bare `import SmoothCommands`, which only worked in a dev layout.
-- **Manual-install docs** ([#3](https://github.com/loobric/smooth-freecad/issues/3)):
+  `freecad.Loobric` into its `freecad` namespace and `init_gui.py` never ran (no
+  Loobric button, no preferences). Added it, and fixed `init_gui.py` to import its
+  siblings via the package namespace (`from freecad.Loobric import …`) instead of
+  bare `import LoobricCommands`, which only worked in a dev layout.
+- **Manual-install docs** ([#3](https://github.com/loobric/loobric-freecad/issues/3)):
   added the Windows (`%APPDATA%\FreeCAD\Mod`) and macOS clone paths and a note to
   clone *into* `Mod` and restart FreeCAD.
 
@@ -83,8 +83,8 @@ reference client instead of a bespoke HTTP layer.
 
 ### Changed
 - **Vendors `loobric.py`** (the stdlib-only MIT reference client); `client.py` is
-  now a thin `SmoothApi(loobric.Client)` adapter. **No `requests` dependency and
-  no bespoke `SmoothClient`.**
+  now a thin `LoobricApi(loobric.Client)` adapter. **No `requests` dependency and
+  no bespoke `LoobricClient`.**
 - All UI strings reconciled to the ratified vocabulary (sets, entries, bind /
   bound, Machine).
 
@@ -94,8 +94,8 @@ reference client instead of a bespoke HTTP layer.
 
 ### Known issues
 - Addon install problems on some setups remain open
-  ([#2](https://github.com/loobric/smooth-freecad/issues/2),
-  [#4](https://github.com/loobric/smooth-freecad/issues/4)); see the README
+  ([#2](https://github.com/loobric/loobric-freecad/issues/2),
+  [#4](https://github.com/loobric/loobric-freecad/issues/4)); see the README
   install steps.
 
-[0.2.0]: https://github.com/loobric/smooth-freecad/releases/tag/v0.2.0
+[0.2.0]: https://github.com/loobric/loobric-freecad/releases/tag/v0.2.0

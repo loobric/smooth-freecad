@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 
 """
-Tests for the FreeCAD API adapter (``SmoothApi``, a thin loobric.Client subclass).
+Tests for the FreeCAD API adapter (``LoobricApi``, a thin loobric.Client subclass).
 
 Everything funnels through loobric's single transport seam, so we inject a fake
 transport and assert the method, endpoint, and body each adapter method emits —
@@ -13,12 +13,12 @@ write never carries internal/canonical).
 """
 import pytest
 
-from freecad.Smooth.client import SmoothApi, CLIENT_NAME, CLIENT_VERSION
+from freecad.Loobric.client import LoobricApi, CLIENT_NAME, CLIENT_VERSION
 
 
 @pytest.fixture
 def api():
-    """A SmoothApi over a fake transport that records every request and returns
+    """A LoobricApi over a fake transport that records every request and returns
     a canned record-shaped response."""
     captured = []
 
@@ -26,7 +26,7 @@ def api():
         captured.append({"method": method, "endpoint": endpoint, "body": kw.get("body")})
         return {"items": [], "internal": {"id": "rec-1"}}
 
-    client = SmoothApi("https://smooth.example/", api_key="k", transport=transport)
+    client = LoobricApi("https://loobric.example/", api_key="k", transport=transport)
     client._captured = captured
     return client
 

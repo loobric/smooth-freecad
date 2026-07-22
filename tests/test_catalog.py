@@ -3,14 +3,14 @@
 # SPDX-License-Identifier: MIT
 
 """
-Tests for the M2 catalog flow: ``sync.create_tool_from_catalog`` (smooth-core's
+Tests for the M2 catalog flow: ``sync.create_tool_from_catalog`` (loobric-server's
 catalog->instance feature, FreeCAD half).
 
 The contract under test, exercised against the in-memory sectioned ``FakeServer``
 (conftest), which seeds one ToolCatalogRecord:
 
 - creating from a catalog record mints an UNBOUND server instance AND materializes
-  a local ``.fctb`` in ``Bit/`` linked to that NEW instance (smooth.record_id);
+  a local ``.fctb`` in ``Bit/`` linked to that NEW instance (loobric.record_id);
 - the local tool is pre-filled from the CATALOG's nominal geometry (the instance's
   own measured geometry is empty by M2 design);
 - the sync journal learns the record so the next sync updates, not re-creates;
@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pytest
 
-from freecad.Smooth import sync
+from freecad.Loobric import sync
 from conftest import FakeServer
 
 
@@ -56,7 +56,7 @@ def test_create_tool_from_catalog_writes_linked_fctb(tools_dir):
     path = Path(result["path"])
     assert path.parent.name == "Bit" and path.exists()
     doc = read(path)
-    assert doc["smooth"]["record_id"] == inst_id
+    assert doc["loobric"]["record_id"] == inst_id
     assert doc["shape"] == "endmill.fcstd"
     assert doc["parameter"]["Diameter"] == "6.35 mm"
     assert doc["parameter"]["Flutes"] == 2
@@ -99,7 +99,7 @@ def test_create_tool_from_catalog_honors_name_override(tools_dir):
 @pytest.mark.unit
 def test_created_instance_is_tracked_and_matched_by_next_plan(tools_dir):
     """The new instance is journaled and re-adopted by the next plan via the
-    written-back smooth.record_id — it is matched to its file (not seen as a
+    written-back loobric.record_id — it is matched to its file (not seen as a
     duplicate 'new_local' or a phantom 'deleted_local'), so a later sync acts on
     the one record. (Its geometry is reconciled like any other bit; M2 does not
     push the instance's measured geometry.)"""

@@ -14,18 +14,18 @@ from an entry is just ``bind`` with no instance_id (REBOOT R2).
 """
 import pytest
 
-from freecad.Smooth import loobric
-from freecad.Smooth.client import SmoothApi, SmoothError, HUMAN_ACTOR
+from freecad.Loobric import loobric
+from freecad.Loobric.client import LoobricApi, LoobricError, HUMAN_ACTOR
 
 
 def _api(transport):
-    client = SmoothApi("https://smooth.example/", api_key="k", transport=transport)
+    client = LoobricApi("https://loobric.example/", api_key="k", transport=transport)
     return client
 
 
 @pytest.fixture
 def api():
-    """A SmoothApi over a fake transport recording every request; the canned
+    """A LoobricApi over a fake transport recording every request; the canned
     response satisfies every unwrap the adapter does ('items', 'logs', …)."""
     captured = []
 
@@ -163,7 +163,7 @@ def test_call_log_records_failures_with_status():
         raise loobric.HTTPError(409, "instance ... already installed")
 
     api = _api(boom)
-    with pytest.raises(SmoothError):           # SmoothError == loobric.LoobricError
+    with pytest.raises(LoobricError):           # LoobricError == loobric.LoobricError
         api.bind_entry("entry-1", "inst-2")
     entry = api.call_log[-1]
     assert entry["status"] == 409

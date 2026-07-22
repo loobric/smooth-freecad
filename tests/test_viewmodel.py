@@ -11,7 +11,7 @@ plus the rollup and resolution helpers.
 """
 import pytest
 
-from freecad.Smooth import viewmodel as vm
+from freecad.Loobric import viewmodel as vm
 
 
 # -- helpers to build plan items / records -----------------------------------

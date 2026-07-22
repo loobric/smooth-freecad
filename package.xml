@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no" ?>
 <package format="1" xmlns="https://wiki.freecad.org/Package_Metadata">
-  <name>Smooth</name>
-  <description>Synchronize FreeCAD's CAM tool libraries with a Smooth tool data server.
+  <name>Loobric</name>
+  <description>Synchronize FreeCAD's CAM tool libraries with a Loobric tool data server.
 
-Adds "Smooth" to the CAM workbench toolbar (a modeless Sync / Machines /
+Adds "Loobric" to the CAM workbench toolbar (a modeless Sync / Machines /
 Audit log window) and a preference page for server configuration.
 
 Current capabilities (v2):
@@ -17,20 +17,20 @@ Current capabilities (v2):
 
 Requirements:
 - FreeCAD 1.1 or later with the CAM workbench
-- A Smooth server (self-hosted or hosted) - see https://loobric.com
+- A Loobric server (self-hosted or hosted) - see https://loobric.com
 - Standard library only: no extra Python packages</description>
   <version>0.3.2</version>
   <date>2026-06-23</date>
   <maintainer email="sliptonic@gmail.com">Brad Collette</maintainer>
   <license file="LICENSE">MIT</license>
-  <url type="repository" branch="master">https://github.com/loobric/smooth-freecad</url>
-  <url type="readme">https://github.com/loobric/smooth-freecad/blob/master/README.md</url>
-  <icon>freecad/Smooth/Resources/icons/Smooth.svg</icon>
+  <url type="repository" branch="master">https://github.com/loobric/loobric-freecad</url>
+  <url type="readme">https://github.com/loobric/loobric-freecad/blob/master/README.md</url>
+  <icon>freecad/Loobric/Resources/icons/Loobric.svg</icon>
   
   <content>
     <workbench>
-      <classname>Smooth</classname>
-      <subdirectory>freecad/Smooth</subdirectory>
+      <classname>Loobric</classname>
+      <subdirectory>freecad/Loobric</subdirectory>
     </workbench>
   </content>
 
