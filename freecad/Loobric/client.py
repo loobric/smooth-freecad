@@ -37,7 +37,7 @@ NotFound = loobric.NotFound
 # This client's identity (the `clients` map key) and software version, stamped on
 # every section write; and the actor on human-initiated operator-lane acts.
 CLIENT_NAME = mapping.CLIENT_NAME        # "freecad"
-CLIENT_VERSION = "0.3.1"
+CLIENT_VERSION = "0.4.0"
 HUMAN_ACTOR = "human@freecad"
 
 # Public resource tokens for the generic canonical doors (assert / section sync).
@@ -160,13 +160,21 @@ class LoobricApi(loobric.Client):
             client_version=CLIENT_VERSION, client_item_id=client_item_id)
 
     def assert_set(self, record_id, path, value, actor=CLIENT_NAME):
-        """Declare a canonical set fact ('name' or 'machine_id')."""
+        """Declare a canonical set fact ('name')."""
         return self.assert_field(SETS, record_id, path, value, actor)
 
-    def link_set_machine(self, record_id, machine_id, actor=HUMAN_ACTOR):
-        """Link a set to a machine — a human-initiated ``machine_id`` assert. When
-        linked, member numbers are inherited from the machine's tool-table entries."""
-        return self.link_set_to_machine(record_id, machine_id, actor)
+    def active_setups(self):
+        """Every active setup row (machine_id + tool_set_id). Which machine runs
+        which set is operator-owned (`loobric use-set`); the CAM side only READS
+        it. A pre-setups server (404) reads as no setups."""
+        try:
+            return self.list_setups(status="active")
+        except LoobricError:
+            return []
+
+    def setup_view(self, machine_id):
+        """The machine's derived setup view (ready / claims / notes)."""
+        return self.reconciliation(machine_id)
 
     def delete_set(self, record_id):
         return self.delete_tool_set(record_id)

@@ -76,6 +76,19 @@ def test_row_status_info_and_is_exception():
     assert vm.row_status_info("future")["direction"] is None
 
 
+@pytest.mark.unit
+def test_machine_note_is_information_never_a_task():
+    """A machine note (a table row the active setup doesn't claim,
+    MAPPING_PLAN §5.3) renders as a calm server-side row: synced band (never
+    an exception, never nags), no sync direction, excluded from rollups."""
+    assert vm.is_exception("note") is False
+    assert vm.existence_of("note") == vm.EXIST_SERVER_ONLY
+    assert vm.row_status_info("note")["direction"] is None
+    counts = vm.library_rollup([{"action": "unchanged"}, {"action": "note"}])
+    assert counts["total"] == 1                # the note isn't a sync object
+    assert counts["server_only"] == 0
+
+
 # -- catalog_rows ------------------------------------------------------------
 
 def _catalog(cid, name, manufacturer=None, product_code=None, diameter=None,

@@ -153,6 +153,10 @@ HTTP traffic. Inspecting a record's raw JSON is a right-click action on any row.
 - Tool holder / assembly data is not modeled or synchronized.
 - After a download, reload the CAM tool library to see the changes in FreeCAD's
   editors.
+- A Job's `ToolController.ToolNumber` is a copy taken when the tool is added
+  to the Job; Loobric syncs the *library* number (the claim), not the Job's
+  copy. If the library number changes after a Job was built, update the
+  ToolController and repost — a post-time check is planned, not yet built.
 
 ## Links
 

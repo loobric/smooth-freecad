@@ -112,7 +112,7 @@ def test_create_and_section_for_sets(api):
 
 
 @pytest.mark.unit
-def test_assert_set_members_and_link(api):
+def test_assert_set_members_and_setups(api):
     api.assert_set("set-1", "name", "millstone tools")
     assert last(api)["endpoint"] == "/tool-set-records/set-1/assert"
     assert last(api)["body"]["path"] == "name"
@@ -123,10 +123,14 @@ def test_assert_set_members_and_link(api):
     assert c["endpoint"] == "/tool-set-records/set-1/members"
     assert c["body"]["members"] == [{"tool_record_id": "rec-1", "number": 1}]
 
-    # Linking a set to a machine is a human-actor machine_id assert (Coverage /
-    # Reconcile are gone — REBOOT R2; the set inherits numbers when linked).
-    api.link_set_machine("set-1", "mach-1")
+    # The machine relationship is a SETUP (machine_set_maps), operator-owned;
+    # the CAM side only READS it (MAPPING_PLAN): active rows + the derived view.
+    api.active_setups()
     c = last(api)
-    assert c["endpoint"] == "/tool-set-records/set-1/assert"
-    assert c["body"] == {"path": "machine_id", "value": "mach-1",
-                         "actor": "human@freecad"}
+    assert c["method"] == "GET"
+    assert c["endpoint"] == "/machine-set-maps?status=active"
+
+    api.setup_view("mach-1")
+    c = last(api)
+    assert c["method"] == "GET"
+    assert c["endpoint"] == "/machine-set-maps/status?machine_id=mach-1"

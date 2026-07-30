@@ -28,7 +28,7 @@ The translation between FreeCAD files and this schema lives in
 |---|---|---|
 | Tool bit (`.fctb`) | **ToolInstanceRecord** | The full original document rides verbatim in `clients.freecad.data.fctb` (lossless — unknown keys such as FreeCAD's feeds-and-speeds presets survive a round trip). Shape/type and dimensions are surfaced as canonical asserts. |
 | Tool library (`.fctl`) | **ToolSet** | The label and format version stay in `clients.freecad.data`. Per-tool numbers are promoted out into canonical `members`, because a set's numbering is shared truth. |
-| Tool number (in a library) | number on a **ToolSet member** | When a set is linked to a machine, member numbers are inherited from that machine's tool-table entries. |
+| Tool number (in a library) | number on a **ToolSet member** | The `nr` is the CAM side's durable **claim** — the T-number posted G-code will call. The machine never overwrites it: when a machine runs the set as its active setup (`loobric use-set`), the server reports how reality compares (`satisfied` / `requested` / `mismounted` / `blocked` / `pending bind`) alongside the untouched claim, and the sync view shows it. A member with no claim adopts the machine's observed number on pull — the observation is its first known number. |
 | Machine tool table | **Machine** with **ToolTableEntry** rows | Lives on the Machines surface. An entry can be bound to a ToolInstanceRecord. |
 | (an entry pointing at a tool) | **Binding** | Created by Confirm proposal, Bind existing, or Bind new (mint). |
 | Shape type (`endmill`, `drill`, …) | canonical `geometry.shape` | FreeCAD is the client whose scope permits asserting `geometry.shape`. |

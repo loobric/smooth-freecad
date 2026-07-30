@@ -38,8 +38,37 @@ class FakeServer:
         self.instances = {}   # id -> sectioned record
         self.sets = {}        # id -> sectioned record
         self.catalogs = {}    # id -> sectioned ToolCatalogRecord
+        self.setups = []      # active setup rows ({machine_id, tool_set_id})
+        self.setup_views = {} # machine_id -> the derived setup view
+        self.machines = {}    # id -> sectioned MachineRecord
         self._n = 0
         self._seed_catalog()
+
+    # -- setups (the machine↔set relationship; read-only from the CAM side) --
+
+    def active_setups(self):
+        return list(self.setups)
+
+    def setup_view(self, machine_id):
+        return self.setup_views[machine_id]
+
+    def list_machines(self):
+        return list(self.machines.values())
+
+    def make_setup(self, machine_id, tool_set_id, machine_name=None, notes=None):
+        """Test driver: make `tool_set_id` the machine's active setup with a
+        canned derived view carrying `notes` (the rows the set doesn't claim)."""
+        self.setups.append({"id": self._next("map"), "machine_id": machine_id,
+                            "tool_set_id": tool_set_id, "status": "active"})
+        m = self._blank(machine_id)
+        m["canonical"]["name"] = self._field(machine_name or machine_id)
+        self.machines[machine_id] = m
+        self.setup_views[machine_id] = {
+            "machine_id": machine_id, "active": True,
+            "tool_set_id": tool_set_id, "ready": not notes,
+            "claims": [], "notes": notes or [],
+            "attention": {"important": 0, "notes": len(notes or [])},
+        }
 
     def _next(self, prefix):
         self._n += 1

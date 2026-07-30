@@ -151,6 +151,7 @@ _ACTION_EXISTENCE = {
     "deleted_server": EXIST_LOCAL_ONLY,   # file is still here; record is gone
     "new_server": EXIST_SERVER_ONLY,
     "deleted_local": EXIST_SERVER_ONLY,   # record is still there; file is gone
+    "note": EXIST_SERVER_ONLY,            # machine truth; no .fctb exists
 }
 _ACTION_SYNC = {
     "unchanged": SYNC_SYNCED,
@@ -161,6 +162,10 @@ _ACTION_SYNC = {
     "new_server": SYNC_PENDING,
     "deleted_local": SYNC_PENDING,
     "deleted_server": SYNC_PENDING,
+    # A machine note (a table row the active setup doesn't claim) is
+    # information, never a task (MAPPING_PLAN §5.3): synced band, so it never
+    # counts as an exception and never nags.
+    "note": SYNC_SYNCED,
 }
 
 
@@ -200,6 +205,9 @@ SYNC_STATUS = {
     "new_server": {"label": "server only", "direction": "pull",
                    "hint": "On the server but not in this library — download it."},
     "unchanged": {"label": "in sync", "direction": None, "hint": "In sync."},
+    "note": {"label": "on machine", "direction": None,
+             "hint": "A tool the machine holds that this setup doesn't claim — "
+                     "informational only; there is no file to sync."},
 }
 
 
@@ -228,6 +236,8 @@ def library_rollup(items):
               "modified": 0, "conflict": 0, "deleted": 0, "total": 0}
     for it in items or []:
         action = it.get("action")
+        if action == "note":                  # informational; not a sync object
+            continue
         counts["total"] += 1
         sync_status = sync_status_of(action)
         existence = existence_of(action)

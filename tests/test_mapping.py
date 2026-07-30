@@ -469,6 +469,43 @@ def test_member_without_number_gets_next_free_number():
 
 
 @pytest.mark.unit
+def test_mismount_keeps_the_claim_never_the_observation():
+    """MAPPING_PLAN §5.1: the .fctl nr is the CAM-side CLAIM. A mismounted
+    member (claim 14, machine observed 9) keeps 14 — conceding to 9 is the
+    programmer's explicit edit, never the sync's."""
+    record = {
+        "internal": {"id": "set-1", "version": 2},
+        "canonical": {"name": field("default"),
+                      "members": [
+                          {"tool_record_id": "rec-1",
+                           "number": field(14, source="asserted:freecad"),
+                           "observed": field(9, source="observed:linuxcnc@mill"),
+                           "state": "mismounted"}]},
+        "clients": {},
+    }
+    doc, _ = set_to_fctl(record, {"rec-1": "a.fctb"})
+    assert doc["tools"] == [{"nr": 14, "path": "a.fctb"}]
+
+
+@pytest.mark.unit
+def test_unclaimed_member_adopts_the_observed_number():
+    """ROUNDTRIP step 10: a member with NO claim that got mounted takes the
+    machine's observed number — the observation IS the first known number."""
+    record = {
+        "internal": {"id": "set-1", "version": 2},
+        "canonical": {"name": field("default"),
+                      "members": [
+                          {"tool_record_id": "rec-1",
+                           "number": field(None, source="unknown"),
+                           "observed": field(18, source="observed:linuxcnc@mill"),
+                           "state": "satisfied"}]},
+        "clients": {},
+    }
+    doc, _ = set_to_fctl(record, {"rec-1": "a.fctb"})
+    assert doc["tools"] == [{"nr": 18, "path": "a.fctb"}]
+
+
+@pytest.mark.unit
 def test_set_member_without_known_path_is_reported():
     record = {
         "internal": {"id": "set-1", "version": 1},

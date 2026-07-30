@@ -3,6 +3,34 @@
 All notable changes to **loobric-freecad** (the FreeCAD CAM client for Loobric) are
 recorded here. This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] — 2026-07-29 (pairs with loobric-server 0.7.0 setups, MAPPING_PLAN)
+
+### Changed (BREAKING with servers < 0.7.0 for set↔machine linking only)
+- **Library numbers are durable claims.** A pulled `.fctl` `nr` is the
+  member's asserted claim; the machine's observed number is adopted ONLY when
+  no claim exists (the mounted-before-claimed case). A mismount (CAM says
+  T14, machine has T9) keeps T14 in the library — conceding is the
+  programmer's explicit edit, never the sync's. Ends the round-trip that
+  laundered claims into observations.
+- **"Link to machine…" → "Setup status…" (read-only).** Which machine runs
+  which set is the operator's act (`loobric use-set`); the context menu now
+  shows where the set is active and how reality compares (READY / unmet
+  claims / notes), or "not active on any machine — every number is
+  provisional". `link_set_machine` removed from the embedded client; setups
+  methods (`list_setups` / `reconciliation`) added.
+- The sync view's library rows carry a setup note — "not active on any
+  machine - numbers provisional", "setup: all claims met", or the unmet-claim
+  counts — so provisional numbers are visible where the programmer syncs.
+
+### Added
+- **Machine notes in the sync view.** Rows the active setup doesn't claim —
+  "T8 — unknown tool", the permanently mounted probe — have no `.fctb`, so
+  FreeCAD's own editors structurally cannot show them; they now appear as
+  display-only rows under the owning library in the sync plan (action `note`:
+  informational band, never counted as an exception, never applied, excluded
+  from rollups — MAPPING_PLAN §5.3's "information, not a task", in the tree).
+  Best-effort: a pre-setups server contributes nothing.
+
 ## [0.3.2] — 2026-06-29
 
 ### Added

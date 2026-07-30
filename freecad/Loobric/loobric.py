@@ -310,9 +310,22 @@ class Client:
     def delete_tool_set(self, record_id: str) -> Dict[str, Any]:
         return self._call("DELETE", f"/tool-set-records/{record_id}")
 
-    def link_set_to_machine(self, set_id: str, machine_id: str,
-                            actor: str = "human@cli") -> Dict[str, Any]:
-        return self.assert_field("tool-set-records", set_id, "machine_id", machine_id, actor)
+    # -- setups (the transitory machine↔set relationship) --------------------
+    def list_setups(self, machine_id: Optional[str] = None,
+                    status: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Setup rows, newest first — the active one or a machine's history."""
+        params = []
+        if machine_id:
+            params.append(f"machine_id={machine_id}")
+        if status:
+            params.append(f"status={status}")
+        qs = ("?" + "&".join(params)) if params else ""
+        return self._call("GET", f"/machine-set-maps{qs}").get("items", [])
+
+    def reconciliation(self, machine_id: str) -> Dict[str, Any]:
+        """The machine's derived setup view: ready, claims, notes."""
+        return self._call(
+            "GET", f"/machine-set-maps/status?machine_id={machine_id}")
 
     def set_members(self, set_id: str, members: List[Dict[str, Any]],
                     actor: str = "human@cli") -> Dict[str, Any]:
@@ -824,12 +837,14 @@ def show_tool_set(set_handle):
     print(f"\nTool Set {_rid(s)}")
     print("=" * 78)
     print(f"  Name: {_cval(s, 'name') or '(unnamed)'}")
-    machine = _cval(s, "machine_id")
-    if machine:
-        mname = {_rid(m): _cval(m, "name") for m in _client().list_machines()}.get(machine)
-        print(f"  Machine: {mname or str(machine)[:8]} (member numbers inherited)")
+    active_on = [r["machine_id"] for r in _client().list_setups(status="active")
+                 if r["tool_set_id"] == _rid(s)]
+    if active_on:
+        mnames = {_rid(m): _cval(m, "name") for m in _client().list_machines()}
+        where = ", ".join(mnames.get(mid) or mid[:8] for mid in active_on)
+        print(f"  Active setup on: {where}")
     else:
-        print("  Machine: not linked")
+        print("  Active setup on: no machine - numbers provisional")
     print(f"  Members: {len(members)}")
     if not members:
         print("  (none yet — add tools with 'loobric add-to-set')")

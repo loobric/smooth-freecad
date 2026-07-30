@@ -120,6 +120,29 @@ def record_shape(record):
     return str(value).lower() if value else None
 
 
+def _setup_note(tool_set):
+    """One phrase describing the set's standing against its active setup
+    (MAPPING_PLAN): per-member `state` is present on a read exactly when some
+    machine has this set as its active setup. No states → the set is not
+    active anywhere, so every number is provisional (a claim nothing checks).
+    Unmet claims are named so the programmer sees a mismount (CAM says Tm,
+    machine has Tp) right in the sync view — the honest fix is either the
+    operator remounting or the programmer renumbering here and reposting."""
+    members = _set_members(tool_set)
+    if not any(m.get("state") is not None for m in members):
+        return "not active on any machine - numbers provisional"
+    unmet = {}
+    for m in members:
+        state = m.get("state")
+        if state in (None, "satisfied"):
+            continue
+        unmet[state] = unmet.get(state, 0) + 1
+    if not unmet:
+        return "setup: all claims met"
+    parts = ["%d %s" % (n, s) for s, n in sorted(unmet.items())]
+    return "setup: " + ", ".join(parts) + " - see machine status"
+
+
 def _set_members(record):
     """Canonical member ``[{tool_record_id, number}]`` of a ToolSet, numbers
     unwrapped from their provenance Fields."""
@@ -495,6 +518,7 @@ def plan_sync(tools_dir, client, log=lambda msg: None):
             if action != "unchanged" else ""
         if delta:
             detail += " (" + delta + ")"
+        detail += " · " + _setup_note(tool_set)
         items.append({
             "key": "lib:%s" % basename, "kind": "library",
             "name": local_lib_docs[lpath].get("label") or basename,
@@ -522,6 +546,49 @@ def plan_sync(tools_dir, client, log=lambda msg: None):
                       else "not on the server yet - apply uploads it",
             "library": None, "record": None, "diff": [],
         })
+
+    # --- machine notes (MAPPING_PLAN §8) -------------------------------------
+    # Rows the machine holds that the active setup doesn't claim — an unbound
+    # "unknown tool", or a mounted tool outside the set. They have no .fctb, so
+    # FreeCAD's own editors structurally cannot show them; the sync view is the
+    # one place the programmer sees them. Display-only (action "note": never an
+    # exception, never applied), grouped under the set's library. Best-effort:
+    # a pre-setups server (or a client without the setups API) contributes
+    # nothing and the plan is unchanged.
+    try:
+        active = (client.active_setups()
+                  if hasattr(client, "active_setups") else [])
+        machine_names = ({_record_id(m): _record_name(m)
+                          for m in client.list_machines()}
+                         if active else {})
+        for row in active:
+            sid = row.get("tool_set_id")
+            if sid not in server_set_ids:
+                continue
+            lpath = lib_by_id.get(sid)
+            group = os.path.basename(lpath) if lpath else "server-lib:%s" % sid
+            mid = row.get("machine_id")
+            mname = machine_names.get(mid) or (mid or "?")[:8]
+            try:
+                view = client.setup_view(mid)
+            except Exception:
+                continue
+            for note in (view.get("notes") or []):
+                num = (note.get("number") or {}).get("value")
+                label = (note.get("name") or note.get("description")
+                         or ("unknown tool" if note.get("state") == "unknown tool"
+                             else "?"))
+                items.append({
+                    "key": "machine-note:%s:%s" % (mid, num),
+                    "kind": "machine-note",
+                    "name": "T%s — %s" % (num if num is not None else "?", label),
+                    "path": None, "basename": None, "action": "note",
+                    "detail": "%s on %s — this setup doesn't claim it"
+                              % (note.get("state"), mname),
+                    "library": group, "record": None, "diff": [],
+                })
+    except Exception as exc:                     # never break the plan for a note
+        log("machine notes unavailable: %s" % exc)
 
     # Stable grouping: a bit sits under its owning library whether that library
     # lives locally or only on the server. Without this, server-originated bits
@@ -796,6 +863,8 @@ def apply_sync(tools_dir, client, plan, decisions, shapes=None, log=lambda msg: 
         ", ".join("%s=%s" % (k, v) for k, v in sorted(active.items())) or "none"))
     for item in ordered:
         decision = decisions.get(item["key"], "skip")
+        if item["action"] == "note":
+            continue          # display-only: a machine row; there is nothing to sync
         if decision == "skip" or item["action"] == "unchanged":
             if decision == "skip" and item["action"] != "unchanged":
                 summary["skipped"] += 1

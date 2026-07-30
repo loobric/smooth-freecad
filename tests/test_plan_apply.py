@@ -149,6 +149,63 @@ def test_full_cycle_then_unchanged(tools_dir):
     assert len(server.instances) == 3 and len(server.sets) == 1
 
 
+# -- Machine notes: rows the active setup doesn't claim (MAPPING_PLAN §8) ----
+
+@pytest.mark.unit
+def test_plan_surfaces_machine_notes_under_the_library(tools_dir):
+    """An 'unknown tool' / 'unlisted' machine row has no .fctb, so the sync
+    view is the ONE place the programmer sees it: a display-only `note` item
+    grouped under the set's library."""
+    server = FakeServer()
+    push_everything(tools_dir, server)
+    (sid,) = server.sets
+    server.make_setup("mach-1", sid, machine_name="millstone", notes=[
+        {"entry_id": "e-8", "number": {"value": 8, "source": "observed:x@m"},
+         "state": "unknown tool", "tool_record_id": None, "name": None,
+         "description": None},
+        {"entry_id": "e-30", "number": {"value": 30, "source": "observed:x@m"},
+         "state": "unlisted", "tool_record_id": "inst-probe",
+         "name": "touch probe", "description": None},
+    ])
+
+    plan = plan_by_key(sync.plan_sync(str(tools_dir), server))
+    unknown = plan["machine-note:mach-1:8"]
+    assert unknown["action"] == "note"
+    assert unknown["name"] == "T8 — unknown tool"
+    assert "millstone" in unknown["detail"]
+    probe = plan["machine-note:mach-1:30"]
+    assert probe["name"] == "T30 — touch probe"
+    assert "unlisted" in probe["detail"]
+    # Grouped under the owning library, exactly like its member bits.
+    assert unknown["group"] == "default.fctl"
+    # Display-only: applying everything must not try to sync a note.
+    decisions = {k: "push" for k in plan}
+    summary = sync.apply_sync(str(tools_dir), server, {"items": list(plan.values()),
+                                                       "errors": []}, decisions)
+    assert summary["errors"] == []
+
+
+@pytest.mark.unit
+def test_plan_without_setups_support_is_unchanged(tools_dir):
+    """A client/server without the setups API contributes no notes and no
+    errors — the plan is identical to the pre-setups behavior."""
+    server = FakeServer()
+    push_everything(tools_dir, server)
+
+    class NoSetups:
+        """The FakeServer minus the setups surface (a pre-0.7.0 client)."""
+        def __init__(self, inner):
+            self._inner = inner
+        def __getattr__(self, name):
+            if name in ("active_setups", "setup_view", "list_machines"):
+                raise AttributeError(name)
+            return getattr(self._inner, name)
+
+    plan = sync.plan_sync(str(tools_dir), NoSetups(server))
+    assert plan["errors"] == []
+    assert all(i["action"] != "note" for i in plan["items"])
+
+
 # -- Classification of the four interesting directions -----------------------
 
 @pytest.mark.unit

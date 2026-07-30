@@ -411,12 +411,28 @@ def fctl_to_set_sections(fctl_doc, record_id_by_path, client_item_id=None):
                        asserts=asserts, unresolved=unresolved)
 
 
+def _member_nr(member):
+    """The ``nr`` a member should carry in the .fctl (MAPPING_PLAN §5.1): the
+    CAM-side CLAIM (canonical ``number``), which observation never overwrites.
+    Only when there is no claim at all is the machine's ``observed`` number
+    adopted — the tool was mounted before CAM ever named a position (ROUNDTRIP
+    step 10), so the observation IS the first known number. A mismount
+    (claim 14, observed 9) keeps 14 here; conceding to 9 is the programmer's
+    explicit edit, never the sync's."""
+    nr = _field_value(member.get("number"))
+    if isinstance(nr, int):
+        return nr
+    observed = _field_value(member.get("observed"))
+    return observed if isinstance(observed, int) else None
+
+
 def set_to_fctl(toolset_record, path_by_record_id):
     """Regenerate a .fctl document (FreeCAD tool library) from a sectioned
     ToolSet.
 
-    - Membership order and numbers come from canonical ``members`` (the shared
-      truth); a member with no canonical number gets the next free ``nr``.
+    - Membership order comes from canonical ``members``; each ``nr`` is the
+      member's durable claim (see ``_member_nr`` — observed is adopted only
+      when no claim exists). A member with neither gets the next free ``nr``.
     - The label comes from canonical ``name``, falling back to the FreeCAD
       label stashed in ``clients.freecad.data``.
     - Members whose record has no known ``.fctb`` path are returned in
@@ -432,8 +448,7 @@ def set_to_fctl(toolset_record, path_by_record_id):
              or data.get("fctl_label") or "library")
     members = canonical.get("members") or []
 
-    used = {n for n in (_field_value(m.get("number")) for m in members)
-            if isinstance(n, int)}
+    used = {n for n in (_member_nr(m) for m in members) if isinstance(n, int)}
     next_nr = max(used) + 1 if used else 1
 
     tools = []
@@ -444,7 +459,7 @@ def set_to_fctl(toolset_record, path_by_record_id):
         if path is None:
             unresolved.append(record_id)
             continue
-        nr = _field_value(member.get("number"))
+        nr = _member_nr(member)
         if not isinstance(nr, int):
             nr = next_nr
             next_nr += 1

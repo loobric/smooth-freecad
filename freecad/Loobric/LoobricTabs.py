@@ -555,7 +555,7 @@ class SyncTab(_Tab):
             set_type.setEnabled(record is not None)
         link = None
         if is_set:
-            link = menu.addAction("Link to machine…")
+            link = menu.addAction("Setup status…")
             link.setEnabled(record is not None)
         menu.addSeparator()
         delete = menu.addAction("Delete on server…")
@@ -573,7 +573,7 @@ class SyncTab(_Tab):
         elif set_type is not None and chosen == set_type:
             self._set_type(item)
         elif link is not None and chosen == link:
-            self._link_to_machine(item)
+            self._setup_status(item)
         elif chosen == delete:
             self._delete(item)
 
@@ -604,31 +604,61 @@ class SyncTab(_Tab):
         self.act(lambda: self.client.assert_instance(rid, "geometry.shape", shape),
                  success="Tool type asserted.")
 
-    def _link_to_machine(self, item):
+    def _setup_status(self, item):
+        """READ-ONLY: where this set is the active setup, and how machine
+        reality compares to its claims. Which machine runs which set is the
+        operator's act (`loobric use-set`) — the CAM side sees the truth, it
+        doesn't switch it (MAPPING_PLAN: display, not a menu of actions)."""
         record = item["record"]
         sid = record["internal"]["id"]
         try:
-            machines = self.client.list_machines()
+            active = [r for r in self.client.active_setups()
+                      if r.get("tool_set_id") == sid]
+            machines = {m["internal"]["id"]: record_name(m)
+                        for m in self.client.list_machines()}
         except LoobricError as e:
             self.window.refresh_api_log()
             QtGui.QMessageBox.warning(self, "Loobric", str(e))
             return
         self.window.refresh_api_log()
-        if not machines:
+        if not active:
             QtGui.QMessageBox.information(
-                self, "Link to machine", "No machines on the server yet.")
+                self, "Setup status",
+                "'%s' is not the active setup on any machine — every tool "
+                "number in it is provisional (a claim nothing checks).\n\n"
+                "An operator activates it with:  loobric use-set <machine> "
+                "'%s'" % (record_name(record), record_name(record)))
             return
-        labels = ["%s  [%s]" % (record_name(m), short_id(m)) for m in machines]
-        choice, ok = QtGui.QInputDialog.getItem(
-            self, "Link to machine",
-            "Link '%s' to which machine? (its member numbers are then inherited "
-            "from that machine's tool table)" % record_name(record),
-            labels, 0, False)
-        if not ok:
-            return
-        mid = machines[labels.index(choice)]["internal"]["id"]
-        self.act(lambda: self.client.link_set_machine(sid, mid),
-                 success="Linked to the machine.")
+        lines = []
+        for row in active:
+            mid = row.get("machine_id")
+            mname = machines.get(mid) or (mid or "?")[:8]
+            try:
+                view = self.client.setup_view(mid)
+            except LoobricError:
+                lines.append("%s: (view unavailable)" % mname)
+                continue
+            att = view.get("attention") or {}
+            headline = ("READY" if view.get("ready")
+                        else "NOT READY (%d need attention)"
+                             % att.get("important", 0))
+            lines.append("%s — %s" % (mname, headline))
+            for claim in view.get("claims") or []:
+                if claim.get("state") == "satisfied":
+                    continue
+                num = (claim.get("number") or {}).get("value")
+                obs = (claim.get("observed") or {}).get("value")
+                name = claim.get("name") or (claim.get("tool_record_id") or "")[:8]
+                state = claim.get("state")
+                extra = (" (CAM says T%s, machine has T%s)" % (num, obs)
+                         if state == "mismounted" else "")
+                lines.append("    T%s  %s — %s%s"
+                             % (num if num is not None else "?", name, state, extra))
+            notes = att.get("notes", 0)
+            if notes:
+                lines.append("    %d note(s) — tools mounted that this set "
+                             "doesn't claim" % notes)
+        QtGui.QMessageBox.information(self, "Setup status", "\n".join(lines))
 
     def _delete(self, item):
         record = item["record"]
