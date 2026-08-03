@@ -69,17 +69,37 @@ def get_tools_dir() -> Path:
     return asset_path / "Tools"
 
 
+def effective_tools_dir() -> Path:
+    """The directory the Sync tab should plan against: the asset-store MIRROR
+    when store mode is active (that is what FreeCAD is showing and editing),
+    else FreeCAD's own tool directory."""
+    try:
+        from freecad.Loobric import assetstore
+        active = assetstore.active_tools_dir()
+        if active:
+            return Path(active)
+    except ImportError:
+        pass                    # FreeCAD < 1.1: no asset system, no store
+    return get_tools_dir()
+
+
 class LoobricWindow(QtGui.QDialog):
     """Tabbed Loobric window. Opens on the Sync tab; other tabs lazy-load when
     first shown. One client is shared by every tab. Modeless (see the command),
     so FreeCAD stays usable alongside it."""
 
-    def __init__(self):
+    def __init__(self, tools_dir=None, focus_attention=False):
+        """tools_dir overrides the planned-against directory (the one-time
+        import review points it at FreeCAD's REAL local dir while store mode
+        serves the mirror); focus_attention opens the Sync tab pre-filtered
+        to items needing a decision (the status widget's click-through)."""
         super().__init__()
         self.config = LoobricConfig.load()
         self.client = LoobricApi(self.config["api_url"],
                                 self.config.get("api_key", ""))
         self._api_panel = None
+        self._tools_dir_override = tools_dir
+        self._focus_attention = focus_attention
         self._build_ui()
 
     # -- UI ---------------------------------------------------------------
@@ -111,7 +131,7 @@ class LoobricWindow(QtGui.QDialog):
         layout.addLayout(header)
 
         self.tabs = QtGui.QTabWidget()
-        tools_dir = str(get_tools_dir())
+        tools_dir = str(self._tools_dir_override or effective_tools_dir())
         # The one CAM surface; binding lives on Machines; Audit is read-only.
         self.sync_tab = LoobricTabs.SyncTab(self, self.client, tools_dir)
         self.catalog_tab = LoobricTabs.CatalogTab(self, self.client, tools_dir)
@@ -162,6 +182,9 @@ class LoobricWindow(QtGui.QDialog):
 
     def _on_open(self):
         self._check_connection()
+        if self._focus_attention:
+            # arrive filtered: only what needs a decision (held conflicts)
+            self.sync_tab.attention_button.setChecked(True)
         self.sync_tab.ensure_loaded()        # the default, primary tab
 
     def _check_connection(self):

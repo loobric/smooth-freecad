@@ -85,6 +85,18 @@ def _freecad_section(record):
     return ((record.get("clients") or {}).get(mapping.CLIENT_NAME) or {})
 
 
+def _job_origin(record):
+    """The freecad-section data of a ToolSet created from a CAM Job, or None.
+
+    Job-derived sets deliberately have NO .fctl — the user's tool libraries are
+    never touched (jobset.py) — so the sync plan must show them read-only
+    instead of as a pending 'server only' download (whose default direction
+    would materialize exactly the library file the feature promises not to
+    create)."""
+    data = _freecad_section(record).get("data") or {}
+    return data if data.get("origin") == "job" else None
+
+
 def _client_item_id(record):
     return _freecad_section(record).get("client_item_id")
 
@@ -484,6 +496,20 @@ def plan_sync(tools_dir, client, log=lambda msg: None):
         sid = _record_id(tool_set)
         lpath = lib_by_id.get(sid)
         if not lpath or lpath not in local_lib_docs:
+            origin = _job_origin(tool_set)
+            if origin is not None:
+                items.append({
+                    "key": "server-lib:%s" % sid, "kind": "library",
+                    "name": _record_name(tool_set) or "?", "path": None,
+                    "basename": None, "action": "job_set",
+                    "detail": "from CAM job '%s' (%s) — read-only here; "
+                              "re-run 'Create tool set from job' to update · %s"
+                              % (origin.get("job") or "?",
+                                 origin.get("document") or "?",
+                                 _setup_note(tool_set)),
+                    "library": None, "record": tool_set, "diff": [],
+                })
+                continue
             if sid in state["tool_sets"]:
                 items.append({
                     "key": "server-lib:%s" % sid, "kind": "library",
@@ -683,6 +709,41 @@ def create_tool_from_catalog(tools_dir, client, catalog_record, name=None,
     return {"path": path, "instance": inst, "basename": basename}
 
 
+def upload_bit(tools_dir, client, path, log=lambda msg: None):
+    """Upload one ``.fctb`` outside a full apply — create its server record, or
+    update the one its ``loobric.record_id`` names. The job-set flow uses this
+    for members that aren't on the server yet.
+
+    Same identity discipline as apply's push path: FreeCAD's section is
+    written, the canonical facts are asserted through the assert door, the
+    record id is written back into the file immediately, and the sync journal
+    learns the mapping — so the next plan sees the bit as synced, never as a
+    duplicate. Returns the record id.
+    """
+    doc = _read_json(path)
+    basename = os.path.basename(path)
+    sections = mapping.record_to_instance_sections(
+        doc, client_item_id=doc.get("id") or basename)
+    rid = mapping.fctb_record_id(doc)
+    if rid:
+        client.put_instance_section(rid, sections.data, sections.client_item_id)
+        log("  UPLOAD bit %s -> UPDATE record %s" % (basename, rid[:8]))
+    else:
+        created = client.create_instance(sections.data, sections.client_item_id)
+        rid = _record_id(created)
+        log("  UPLOAD bit %s -> CREATE new server record %s"
+            % (basename, rid[:8]))
+    results = client.assert_instance_fields(rid, sections.asserts,
+                                            actor=mapping.CLIENT_NAME)
+    version = _record_version(results[-1]) if results \
+        else _record_version(client.get_instance(rid))
+    _writeback_identity(path, rid, version)
+    state = _load_sync_state(tools_dir)
+    state["records"][rid] = basename
+    _save_sync_state(tools_dir, state)
+    return rid
+
+
 class SyncApplyError(Exception):
     """Apply-time failure for one item (others proceed)."""
 
@@ -863,8 +924,8 @@ def apply_sync(tools_dir, client, plan, decisions, shapes=None, log=lambda msg: 
         ", ".join("%s=%s" % (k, v) for k, v in sorted(active.items())) or "none"))
     for item in ordered:
         decision = decisions.get(item["key"], "skip")
-        if item["action"] == "note":
-            continue          # display-only: a machine row; there is nothing to sync
+        if item["action"] in ("note", "job_set"):
+            continue          # display-only rows; there is nothing to sync
         if decision == "skip" or item["action"] == "unchanged":
             if decision == "skip" and item["action"] != "unchanged":
                 summary["skipped"] += 1

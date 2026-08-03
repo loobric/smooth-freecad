@@ -128,6 +128,16 @@
     </widget>
    </item>
    <item>
+    <widget class="QCheckBox" name="assetStoreCheckbox">
+     <property name="text">
+      <string>Serve the CAM tool library from Loobric (experimental, FreeCAD 1.1+)</string>
+     </property>
+     <property name="toolTip">
+      <string>Asset store mode: FreeCAD's own tool library dock and editors show and edit server-backed tools, synced invisibly in the background through a local mirror (works offline). Activates when the CAM workbench is opened.</string>
+     </property>
+    </widget>
+   </item>
+   <item>
     <spacer name="verticalSpacer_4">
      <property name="orientation">
       <enum>Qt::Vertical</enum>

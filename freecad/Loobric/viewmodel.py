@@ -14,8 +14,10 @@ Three groups:
 - View builders, one per primary surface — :func:`sync_tree` (the Sync tab's
   grouped plan) and :func:`machine_tables` (the Machines tab's per-machine tool
   tables with pending bindings folded in). The widgets only render their output.
-- The sync-row decision helpers: the Existence/Sync status axes, the per-object
-  resolution rows, and the folder-node ``cascade_choice``.
+- The sync-row decision helpers: the Existence/Sync status axes, the checkbox
+  model (:func:`row_apply_info` / :func:`force_options` — direction is DERIVED
+  from status; the user only chooses inclusion), and the per-object resolution
+  rows.
 """
 from . import mapping
 
@@ -152,6 +154,7 @@ _ACTION_EXISTENCE = {
     "new_server": EXIST_SERVER_ONLY,
     "deleted_local": EXIST_SERVER_ONLY,   # record is still there; file is gone
     "note": EXIST_SERVER_ONLY,            # machine truth; no .fctb exists
+    "job_set": EXIST_SERVER_ONLY,         # from a CAM job; deliberately no .fctl
 }
 _ACTION_SYNC = {
     "unchanged": SYNC_SYNCED,
@@ -166,6 +169,10 @@ _ACTION_SYNC = {
     # information, never a task (MAPPING_PLAN §5.3): synced band, so it never
     # counts as an exception and never nags.
     "note": SYNC_SYNCED,
+    # A job-derived ToolSet deliberately has no .fctl (the user's tool
+    # libraries are never touched), so there is nothing to sync: synced band,
+    # read-only row, never a pending download.
+    "job_set": SYNC_SYNCED,
 }
 
 
@@ -208,6 +215,10 @@ SYNC_STATUS = {
     "note": {"label": "on machine", "direction": None,
              "hint": "A tool the machine holds that this setup doesn't claim — "
                      "informational only; there is no file to sync."},
+    "job_set": {"label": "from job", "direction": None,
+                "hint": "Created from a CAM job — read-only here. No library "
+                        "file is written; re-run 'Create tool set from job' to "
+                        "update it."},
 }
 
 
@@ -218,6 +229,66 @@ def row_status_info(action):
     if info is None:
         return {"label": str(action), "direction": None, "hint": ""}
     return dict(info)
+
+
+# ---------------------------------------------------------------------------
+# The checkbox apply model: direction is DERIVED from status, the user only
+# chooses inclusion. Rows with no safe default (conflicts, deletions) carry no
+# checkbox — they are resolved through the per-object resolution view instead.
+# ---------------------------------------------------------------------------
+
+APPLY_LABELS = {"push": "↑ upload", "pull": "↓ download"}
+FORCED_LABELS = {"push": "↑ upload (forced)", "pull": "↓ download (forced)"}
+RESOLVE_LABEL = "resolve…"
+
+
+def row_apply_info(action):
+    """How one plan row takes part in Apply, for the checkbox model.
+
+    Returns ``{"checkable", "checked", "direction", "label"}``:
+
+    - a row whose status implies a safe direction (changed here/on server,
+      new here, server only) is checkable, checked by default, and shows the
+      fixed derived action label;
+    - a row with no safe default (conflict, deletion) is not checkable and
+      shows :data:`RESOLVE_LABEL` — the resolution view is its only path;
+    - in-sync / informational rows (unchanged, note, job_set) take no part.
+    """
+    if action in ("unchanged", "note", "job_set"):
+        return {"checkable": False, "checked": False, "direction": None,
+                "label": ""}
+    direction = (SYNC_STATUS.get(action) or {}).get("direction")
+    if direction is None:
+        return {"checkable": False, "checked": False, "direction": None,
+                "label": RESOLVE_LABEL}
+    return {"checkable": True, "checked": True, "direction": direction,
+            "label": APPLY_LABELS[direction]}
+
+
+def force_options(action, has_local, has_server):
+    """The deliberate against-the-suggestion overrides available for one row,
+    as ``[(direction, menu_label)]`` — offered in the row's context menu, never
+    inline. Only modified rows can be forced (creates have only one side, and
+    conflicts/deletions already go through resolution)."""
+    out = []
+    if action == "push" and has_server:
+        out.append(("pull", "Force download (discard local changes)"))
+    if action == "pull" and has_local:
+        out.append(("push", "Force upload (overwrite server changes)"))
+    return out
+
+
+def apply_button_text(pushes, pulls):
+    """The Apply button states its plan — '3 uploads, 2 downloads' — so the
+    user never has to audit rows to know what will happen."""
+    parts = []
+    if pushes:
+        parts.append("%d upload%s" % (pushes, "" if pushes == 1 else "s"))
+    if pulls:
+        parts.append("%d download%s" % (pulls, "" if pulls == 1 else "s"))
+    if not parts:
+        return "Apply"
+    return "Apply (%s)" % ", ".join(parts)
 
 
 # ---------------------------------------------------------------------------
@@ -312,7 +383,13 @@ def sync_tree(plan_items, attention_only=False):
                          key=lambda i: i.get("name") or "")
         for bit in members:
             shown.add(bit.get("key"))
-        rollup = library_rollup_line(library_rollup(members))
+        if library.get("action") == "job_set":
+            # A job-derived set is read-only and fileless; the sync-count
+            # rollup is meaningless for it — show its detail (origin + setup
+            # standing) instead.
+            rollup = library.get("detail") or "from job — read-only"
+        else:
+            rollup = library_rollup_line(library_rollup(members))
         lib_item = library if _keep(library) else None
         kept_members = [m for m in members if _keep(m)]
         if attention_only and lib_item is None and not kept_members:
@@ -468,37 +545,19 @@ RESOLUTION_DECISION = {"keep_local": "push", "keep_server": "pull", "skip": "ski
 
 def resolution_actions(item):
     """The resolution choices offered for one sync exception, as
-    ``[(choice_key, label)]``. Keep Local / Keep Server reuse the existing
-    upload/download write paths; Skip is always available."""
+    ``[(choice_key, label)]``. The two 'keep' choices reuse the existing
+    upload/download write paths; Skip is always available. Deletion rows get
+    labels that say what actually happens (propagate vs restore) instead of
+    the generic Keep Local/Keep Server."""
+    action = (item or {}).get("action")
+    if action == "deleted_local":
+        return [("keep_local", "Delete on server too"),
+                ("keep_server", "Restore from server"),
+                ("skip", "Skip")]
+    if action == "deleted_server":
+        return [("keep_local", "Upload again (restore)"),
+                ("keep_server", "Delete local file too"),
+                ("skip", "Skip")]
     return [("keep_local", "Keep Local (upload)"),
             ("keep_server", "Keep Server (download)"),
             ("skip", "Skip")]
-
-
-# ---------------------------------------------------------------------------
-# Bulk-action cascade (the folder-node "set all" menu)
-# ---------------------------------------------------------------------------
-
-# Combo index convention shared by every sync row:
-#   0 = leave unsynced (skip)
-#   1 = local wins  (upload / propagate-deletion / restore-upload)
-#   2 = server wins (download / restore-file / delete-local)
-SKIP, LOCAL_WINS, SERVER_WINS = 0, 1, 2
-
-
-def cascade_choice(node_index, has_local, has_server, is_deletion):
-    """Map a folder-node direction onto one child row.
-
-    ``node_index`` is the direction the user set on the ToolSet/group node
-    (SKIP / LOCAL_WINS / SERVER_WINS). Returns the combo index to apply to a
-    child with the given capabilities, or ``None`` to leave the child untouched
-    (the direction doesn't apply — e.g. 'download' on a tool that exists only
-    locally). Deletion rows always accept index 1/2 (their positional choices
-    are 'propagate'/'restore'), so a real direction never skips them."""
-    if node_index == SKIP:
-        return SKIP
-    if node_index == LOCAL_WINS:
-        return LOCAL_WINS if (is_deletion or has_local) else None
-    if node_index == SERVER_WINS:
-        return SERVER_WINS if (is_deletion or has_server) else None
-    return None

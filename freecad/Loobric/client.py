@@ -37,7 +37,7 @@ NotFound = loobric.NotFound
 # This client's identity (the `clients` map key) and software version, stamped on
 # every section write; and the actor on human-initiated operator-lane acts.
 CLIENT_NAME = mapping.CLIENT_NAME        # "freecad"
-CLIENT_VERSION = "0.4.0"
+CLIENT_VERSION = "0.5.0"
 HUMAN_ACTOR = "human@freecad"
 
 # Public resource tokens for the generic canonical doors (assert / section sync).

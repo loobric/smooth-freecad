@@ -9,10 +9,11 @@ The information architecture is deliberately small (reboot Phase 3):
 
 - **Sync** — the one CAM surface: a hierarchical ToolSet→tool plan of the local
   FreeCAD tool directory against the server, with an "out of sync" filter
-  (it is a *view* over the single plan, not a second screen) and per-row
-  upload/download decisions. Tool/ToolSet management (rename, set type, delete,
-  link a set to a machine) lives here as row actions; a changed row opens a
-  side-by-side resolution.
+  (it is a *view* over the single plan, not a second screen) and the checkbox
+  apply model (direction is derived from status; the user only chooses
+  inclusion). Tool/ToolSet management (rename, set type, delete, setup status)
+  lives here as row actions; a conflict/deletion opens a side-by-side
+  resolution that applies immediately.
 - **Machines** — the one binding surface: each machine's tool table, with pending
   binding proposals from the Inbox folded in (Confirm/Reject inline) and manual
   bind / bind-new / unbind.
@@ -33,9 +34,8 @@ from . import sync, mapping, viewmodel
 from .client import LoobricError
 from .viewmodel import (field_value, canonical as _canonical, short_id,
                         record_name, instance_shape, instance_diameter,
-                        fmt_dia as _fmt_dia, cascade_choice, SKIP, LOCAL_WINS,
-                        SERVER_WINS, resolution_rows, resolution_actions,
-                        RESOLUTION_DECISION)
+                        fmt_dia as _fmt_dia, resolution_rows,
+                        resolution_actions, RESOLUTION_DECISION)
 
 
 # A light tint + dark foreground for rows that have moved away from sync, legible
@@ -247,38 +247,31 @@ class ResolutionDialog(QtGui.QDialog):
 class SyncTab(_Tab):
     """Hierarchical browse of every ToolSet and its tools, each set labelled with
     a derived rollup (✓ synced · ↑ local-only · ↓ server-only · ⚠ conflicts).
-    Set a direction on a folder node to cascade it; each row is still
-    individually overridable. An 'out of sync' filter narrows to the items
-    that aren't in sync. Right-click a row for management (rename, set type,
-    delete, link a set to a machine); double-click a changed row to resolve it
-    field-by-field. Nothing touches disk or server until Apply."""
+
+    The checkbox apply model (viewmodel.row_apply_info): a row's direction is
+    DERIVED from its status — the user only chooses inclusion. Safe rows come
+    checked with a fixed ↑/↓ action; a set node's tri-state checkbox toggles
+    its rows at once; the Apply button states its plan ('3 uploads, 2
+    downloads'). Conflicts and deletions carry no checkbox — double-click
+    resolves them field-by-field and applies immediately. Forcing the opposite
+    direction is a deliberate act in the row's right-click menu, which also
+    holds management (rename, set type, delete, setup status). Bulk Apply
+    touches nothing until the button is pressed."""
 
     TITLE = "Sync"
 
     STATUS_ICON = {
         "unchanged": "✓", "push": "↑", "pull": "↓", "new_local": "↑",
         "new_server": "↓", "conflict": "⚠", "deleted_local": "✖",
-        "deleted_server": "✖",
+        "deleted_server": "✖", "job_set": "📋",
     }
-    DIRECTIONS = ["leave unsynced", "upload local → server",
-                  "download server → local"]
-    ROW_CHOICES = {
-        "deleted_local": ["leave unsynced", "delete on server too",
-                          "restore from server"],
-        "deleted_server": ["leave unsynced", "upload again (restore)",
-                           "delete local file too"],
-    }
-    DECISIONS = {LOCAL_WINS: "push", SERVER_WINS: "pull"}
-    DEFAULT_DIRECTION = {"push": LOCAL_WINS, "new_local": LOCAL_WINS,
-                         "pull": SERVER_WINS, "new_server": SERVER_WINS,
-                         "conflict": SKIP, "deleted_local": SKIP,
-                         "deleted_server": SKIP}
 
     def __init__(self, window, client, tools_dir):
         super().__init__(window, client)
         self.tools_dir = tools_dir
         self.plan = {"items": [], "errors": []}
-        self._row_widgets = {}
+        self._row_items = {}        # item key -> its QTreeWidgetItem
+        self._forced = {}           # item key -> forced direction override
         self._shape_widgets = {}
         self._guessed = 0
         self._attention_only = False
@@ -289,9 +282,9 @@ class SyncTab(_Tab):
 
         top = QtGui.QHBoxLayout()
         hint = QtGui.QLabel(
-            "Tip: use the dropdown on a 📁 tool-set row to set every tool inside "
-            "at once; right-click a row to inspect, rename, set type, delete, or "
-            "link a set to a machine.")
+            "Check the items to sync — each row's ↑/↓ action follows its "
+            "status; a 📁 set's checkbox toggles all its tools. Double-click a "
+            "⚠/✖ row to resolve it; right-click for management and overrides.")
         hint.setWordWrap(True)
         top.addWidget(hint, stretch=1)
         # A checkable button (not a checkbox) so the on/off state is visible on
@@ -313,6 +306,7 @@ class SyncTab(_Tab):
         self.tree.customContextMenuRequested.connect(self._context_menu)
         self.tree.itemSelectionChanged.connect(self._show_diff)
         self.tree.itemDoubleClicked.connect(lambda *_: self._resolve_selected())
+        self.tree.itemChanged.connect(self._item_changed)
         layout.addWidget(self.tree, stretch=3)
 
         self.diff_pane = QtGui.QTextEdit()
@@ -326,19 +320,22 @@ class SyncTab(_Tab):
         # No inline log pane — apply progress goes to the status line and the
         # FreeCAD report view; raw HTTP traffic is under Debug ▸ API log.
         buttons = QtGui.QHBoxLayout()
-        self.defaults_button = QtGui.QPushButton("All: Suggested")
-        self.defaults_button.setToolTip(
-            "Set every changed item to its suggested upload/download direction. "
-            "Conflicts and deletions stay 'leave unsynced' — you decide those.")
-        self.defaults_button.clicked.connect(lambda: self._set_all(default=True))
-        buttons.addWidget(self.defaults_button)
-        self.skip_button = QtGui.QPushButton("All: Skip")
-        self.skip_button.setToolTip(
-            "Set every item to 'leave unsynced' — Apply would then do nothing.")
-        self.skip_button.clicked.connect(lambda: self._set_all(default=False))
-        buttons.addWidget(self.skip_button)
+        self.check_all_button = QtGui.QPushButton("Check all")
+        self.check_all_button.setToolTip(
+            "Check every item with a safe direction. Conflicts and deletions "
+            "have no checkbox — resolve those by double-clicking them.")
+        self.check_all_button.clicked.connect(lambda: self._check_all(True))
+        buttons.addWidget(self.check_all_button)
+        self.uncheck_all_button = QtGui.QPushButton("Uncheck all")
+        self.uncheck_all_button.setToolTip(
+            "Uncheck every item — Apply would then do nothing.")
+        self.uncheck_all_button.clicked.connect(lambda: self._check_all(False))
+        buttons.addWidget(self.uncheck_all_button)
         buttons.addStretch()
-        self.apply_button = QtGui.QPushButton("Apply Selected")
+        self.apply_button = QtGui.QPushButton("Apply")
+        self.apply_button.setToolTip(
+            "Sync every checked item in its shown direction. Nothing touches "
+            "disk or the server until this is pressed.")
         self.apply_button.clicked.connect(self._run_apply)
         self.apply_button.setEnabled(False)
         buttons.addWidget(self.apply_button)
@@ -363,7 +360,9 @@ class SyncTab(_Tab):
             self._notify("✗ planning failed: %s" % e)
             self._append("Planning failed: %s" % e)
             self.tree.clear()
-            self.apply_button.setEnabled(False)
+            self._row_items = {}
+            self._forced = {}
+            self._update_apply()
             return
         self.window.refresh_api_log()
         for error in self.plan["errors"]:
@@ -373,29 +372,34 @@ class SyncTab(_Tab):
     def _render(self):
         """Build the tree from the view-model — the single source of 'what to
         show'. Called on refresh and when the attention filter toggles (no
-        re-fetch)."""
+        re-fetch). Signals are blocked during the rebuild so the checkbox
+        handler only ever sees user edits."""
+        self.tree.blockSignals(True)
         self.tree.clear()
-        self._row_widgets = {}
+        self._row_items = {}
+        self._forced = {}
         self._shape_widgets = {}
         self._guessed = 0
         model = viewmodel.sync_tree(self.plan["items"],
                                     attention_only=self._attention_only)
         for group in model["groups"]:
-            icon = "📁" if group["kind"] == "library" else "📄"
+            lib_item = group["library_item"]
+            is_job_set = lib_item is not None and lib_item.get("action") == "job_set"
+            icon = "📋" if is_job_set else (
+                "📁" if group["kind"] == "library" else "📄")
             node = QtGui.QTreeWidgetItem(
                 ["%s %s" % (icon, group["name"]), group["rollup"], "", ""])
-            node.setToolTip(1, "Derived from this set's tools — the set itself is "
-                               "never 'conflicted'.")
+            node.setToolTip(1, group["rollup"] if is_job_set else
+                            "Derived from this set's tools — the set itself is "
+                            "never 'conflicted'.")
             self.tree.addTopLevelItem(node)
-            child_keys = []
-            if group["library_item"] is not None:
-                self._add_row(node, group["library_item"], indent_self=True)
-                child_keys.append(group["library_item"]["key"])
+            if lib_item is not None:
+                self._add_row(node, lib_item, indent_self=True)
             for bit in group["members"]:
                 self._add_row(node, bit)
-                child_keys.append(bit["key"])
-            self._attach_cascade(node, child_keys)
+            self._init_group_checkbox(node)
             node.setExpanded(True)
+        self.tree.blockSignals(False)
 
         pending = model["pending"]
         if pending:
@@ -405,10 +409,7 @@ class SyncTab(_Tab):
             self._notify("Plan ready: %d item(s) need attention.%s" % (pending, extra))
         else:
             self._notify("Everything is in sync.")
-        # The bulk-direction and apply controls only mean something when there is
-        # at least one changed item.
-        for b in (self.apply_button, self.defaults_button, self.skip_button):
-            b.setEnabled(pending > 0)
+        self._update_apply()
 
     def _tool_type_text(self, item):
         """The tool type to show in the 'Tool type' column for a bit row (sets
@@ -426,25 +427,24 @@ class SyncTab(_Tab):
         label = "(this tool set)" if indent_self else item["name"]
         info = viewmodel.row_status_info(item["action"])
         status = "%s %s" % (self.STATUS_ICON.get(item["action"], ""), info["label"])
-        row = QtGui.QTreeWidgetItem([label, status, "", self._tool_type_text(item)])
+        apply_info = viewmodel.row_apply_info(item["action"])
+        row = QtGui.QTreeWidgetItem([label, status, apply_info["label"],
+                                     self._tool_type_text(item)])
         row.setToolTip(1, item["detail"] or info["hint"])
         row.setData(0, QtCore.Qt.UserRole, item["key"])
         parent.addChild(row)
-        # In-sync rows stay SELECTABLE (so they can be inspected / right-clicked);
-        # they just get no direction control.
-        if item["action"] == "unchanged":
-            return
-        combo = QtGui.QComboBox()
-        combo.addItems(self.ROW_CHOICES.get(item["action"], self.DIRECTIONS))
-        combo.setCurrentIndex(self.DEFAULT_DIRECTION[item["action"]])
-        if item["action"] not in self.ROW_CHOICES:
-            if item["path"] is None:
-                combo.model().item(LOCAL_WINS).setEnabled(False)   # nothing local
-            if item["record"] is None:
-                combo.model().item(SERVER_WINS).setEnabled(False)  # nothing on server
-        self.tree.setItemWidget(row, 2, combo)
-        self._row_widgets[item["key"]] = combo
-        if sync.needs_shape_choice(item):
+        if apply_info["checkable"]:
+            row.setFlags(row.flags() | QtCore.Qt.ItemIsUserCheckable)
+            row.setCheckState(0, QtCore.Qt.Checked if apply_info["checked"]
+                              else QtCore.Qt.Unchecked)
+            self._row_items[item["key"]] = row
+        elif apply_info["label"]:
+            # A conflict/deletion: no checkbox — resolution is its only path.
+            row.setToolTip(2, "No safe default — double-click to choose a side "
+                              "(applies immediately).")
+        # The download-time tool-type choice stays for bulk-applied downloads;
+        # conflicts resolve through the dialog, which doesn't take a type.
+        if sync.needs_shape_choice(item) and item["action"] != "conflict":
             shape_combo = QtGui.QComboBox()
             shape_combo.addItems(mapping.FREECAD_SHAPES)
             guess = mapping.guess_shape_from_name(item["name"])
@@ -461,46 +461,89 @@ class SyncTab(_Tab):
             self.tree.setItemWidget(row, 3, shape_combo)
             self._shape_widgets[item["key"]] = shape_combo
 
-    def _attach_cascade(self, node, child_keys):
-        """A folder-node menu that pushes one direction onto every child row
-        (where it applies). It acts like a menu, not a state: it resets after use."""
-        actionable = [k for k in child_keys if k in self._row_widgets]
-        if not actionable:
-            return
-        combo = QtGui.QComboBox()
-        combo.addItems(["Set all in set…"] + self.DIRECTIONS)
-        combo.activated.connect(
-            lambda i, keys=actionable, c=combo: self._cascade(i, keys, c))
-        self.tree.setItemWidget(node, 2, combo)
+    # -- the checkbox model ------------------------------------------------
 
-    def _cascade(self, selected, child_keys, combo):
-        combo.setCurrentIndex(0)            # menu, not state
-        if selected == 0:
+    def _init_group_checkbox(self, node):
+        """A set node with at least one checkable row gets a tri-state checkbox
+        that toggles them all at once (checked/unchecked/partial mirrors its
+        rows)."""
+        keys = [node.child(i).data(0, QtCore.Qt.UserRole)
+                for i in range(node.childCount())]
+        if not any(k in self._row_items for k in keys):
             return
-        node_index = selected - 1           # 0/1/2 == SKIP/LOCAL_WINS/SERVER_WINS
-        items_by_key = {i["key"]: i for i in self.plan["items"]}
-        for key in child_keys:
-            child = self._row_widgets.get(key)
-            item = items_by_key.get(key)
-            if child is None or item is None:
-                continue
-            target = cascade_choice(
-                node_index, has_local=item["path"] is not None,
-                has_server=item["record"] is not None,
-                is_deletion=item["action"] in ("deleted_local", "deleted_server"))
-            if target is None:
-                continue
-            model_item = child.model().item(target)
-            if model_item is not None and model_item.isEnabled():
-                child.setCurrentIndex(target)
+        node.setFlags(node.flags() | QtCore.Qt.ItemIsUserCheckable)
+        self._sync_group_state(node)
 
-    def _set_all(self, default):
-        items_by_key = {i["key"]: i for i in self.plan["items"]}
-        for key, combo in self._row_widgets.items():
-            if default:
-                combo.setCurrentIndex(self.DEFAULT_DIRECTION[items_by_key[key]["action"]])
+    def _sync_group_state(self, node):
+        """Recompute a set node's tri-state from its checkable rows."""
+        states = [node.child(i).checkState(0)
+                  for i in range(node.childCount())
+                  if node.child(i).data(0, QtCore.Qt.UserRole) in self._row_items]
+        if not states:
+            return
+        if all(s == QtCore.Qt.Checked for s in states):
+            node.setCheckState(0, QtCore.Qt.Checked)
+        elif all(s == QtCore.Qt.Unchecked for s in states):
+            node.setCheckState(0, QtCore.Qt.Unchecked)
+        else:
+            node.setCheckState(0, QtCore.Qt.PartiallyChecked)
+
+    def _item_changed(self, item, column):
+        """Checkbox plumbing: a set node's state fans out to its rows; a row's
+        change rolls up to its node; either way the Apply plan re-counts."""
+        if column != 0:
+            return
+        self.tree.blockSignals(True)
+        try:
+            if item.parent() is None:                 # a set/group node
+                state = item.checkState(0)
+                if state != QtCore.Qt.PartiallyChecked:
+                    for i in range(item.childCount()):
+                        child = item.child(i)
+                        if child.data(0, QtCore.Qt.UserRole) in self._row_items:
+                            child.setCheckState(0, state)
             else:
-                combo.setCurrentIndex(SKIP)
+                self._sync_group_state(item.parent())
+        finally:
+            self.tree.blockSignals(False)
+        self._update_apply()
+
+    def _check_all(self, on):
+        state = QtCore.Qt.Checked if on else QtCore.Qt.Unchecked
+        self.tree.blockSignals(True)
+        for row in self._row_items.values():
+            row.setCheckState(0, state)
+        for i in range(self.tree.topLevelItemCount()):
+            self._sync_group_state(self.tree.topLevelItem(i))
+        self.tree.blockSignals(False)
+        self._update_apply()
+
+    def _update_apply(self):
+        """Refresh the Apply button so it always states the current plan."""
+        decisions = self._collect_decisions()
+        pushes = sum(1 for d in decisions.values() if d == "push")
+        pulls = sum(1 for d in decisions.values() if d == "pull")
+        self.apply_button.setText(viewmodel.apply_button_text(pushes, pulls))
+        self.apply_button.setEnabled(bool(decisions))
+        has_rows = bool(self._row_items)
+        self.check_all_button.setEnabled(has_rows)
+        self.uncheck_all_button.setEnabled(has_rows)
+
+    def _force(self, item, direction):
+        """A deliberate against-the-suggestion override from the context menu:
+        flip the row's action label and make sure it's checked."""
+        key = item["key"]
+        self._forced[key] = direction
+        row = self._row_items.get(key)
+        if row is None:
+            return
+        self.tree.blockSignals(True)
+        row.setText(2, viewmodel.FORCED_LABELS[direction])
+        row.setCheckState(0, QtCore.Qt.Checked)
+        if row.parent() is not None:
+            self._sync_group_state(row.parent())
+        self.tree.blockSignals(False)
+        self._update_apply()
 
     def _selected_item(self):
         rows = self.tree.selectedItems()
@@ -546,6 +589,12 @@ class SyncTab(_Tab):
         is_set = item["kind"] == "library"
         inspect = menu.addAction("Inspect record (JSON)…")
         inspect.setEnabled(record is not None)
+        # Deliberate against-the-suggestion overrides (modified rows only).
+        force_actions = [
+            (menu.addAction(label), direction)
+            for direction, label in viewmodel.force_options(
+                item["action"], item.get("path") is not None,
+                record is not None)]
         menu.addSeparator()
         rename = menu.addAction("Rename…")
         rename.setEnabled(record is not None)
@@ -566,6 +615,10 @@ class SyncTab(_Tab):
         chosen = menu.exec_(self.tree.viewport().mapToGlobal(point))
         if chosen is None:
             return
+        for act, direction in force_actions:
+            if chosen == act:
+                self._force(item, direction)
+                return
         if chosen == inspect:
             self.window.inspect_selected()
         elif chosen == rename:
@@ -678,9 +731,10 @@ class SyncTab(_Tab):
 
     def _resolve_selected(self):
         """Double-click on a changed row → field-by-field resolution, applied
-        through the same upload/download write paths as Apply."""
+        IMMEDIATELY through the same upload/download write paths as Apply (the
+        one deliberate exception to 'nothing happens until Apply')."""
         item = self._selected_item()
-        if not item or item["action"] == "unchanged":
+        if not item or item["action"] in ("unchanged", "note", "job_set"):
             return
         choice = ResolutionDialog(item, parent=self).get_choice()
         if not choice:
@@ -707,9 +761,21 @@ class SyncTab(_Tab):
     # -- apply ------------------------------------------------------------
 
     def _collect_decisions(self):
-        return {key: self.DECISIONS[combo.currentIndex()]
-                for key, combo in self._row_widgets.items()
-                if combo.currentIndex() in self.DECISIONS}
+        """{key: 'push'|'pull'} for every checked row — the forced override
+        when one was set, else the status-derived direction."""
+        items_by_key = {i["key"]: i for i in self.plan["items"]}
+        decisions = {}
+        for key, row in self._row_items.items():
+            if row.checkState(0) != QtCore.Qt.Checked:
+                continue
+            item = items_by_key.get(key)
+            if item is None:
+                continue
+            direction = self._forced.get(key) \
+                or viewmodel.row_apply_info(item["action"])["direction"]
+            if direction:
+                decisions[key] = direction
+        return decisions
 
     def _collect_shapes(self):
         return {key: combo.currentText()
@@ -718,7 +784,7 @@ class SyncTab(_Tab):
     def _run_apply(self):
         decisions = self._collect_decisions()
         if not decisions:
-            self._notify("Nothing selected to apply.")
+            self._notify("Nothing checked to apply.")
             return
         self.apply_button.setEnabled(False)
         try:

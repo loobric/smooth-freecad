@@ -77,6 +77,32 @@ def test_row_status_info_and_is_exception():
 
 
 @pytest.mark.unit
+def test_job_set_is_read_only_never_a_task():
+    """A job-derived ToolSet deliberately has no .fctl (the user's tool
+    libraries are never touched), so it renders as a calm read-only row: synced
+    band, no direction, never pending — and NEVER the old 'server only /
+    download' default that would materialize a library file."""
+    assert vm.is_exception("job_set") is False
+    assert vm.existence_of("job_set") == vm.EXIST_SERVER_ONLY
+    assert vm.row_status_info("job_set")["direction"] is None
+    assert vm.row_apply_info("job_set")["checkable"] is False
+
+
+@pytest.mark.unit
+def test_sync_tree_job_set_group_shows_detail_not_sync_rollup():
+    items = [{"key": "server-lib:s1", "kind": "library", "name": "bracket — Job",
+              "action": "job_set", "group": "server-lib:s1", "record": None,
+              "diff": [],
+              "detail": "created from CAM job 'Job' — read-only here"}]
+    tree = vm.sync_tree(items)
+    [group] = tree["groups"]
+    assert group["rollup"] == "created from CAM job 'Job' — read-only here"
+    assert tree["pending"] == 0
+    # the attention filter drops it (it never needs sync)
+    assert vm.sync_tree(items, attention_only=True)["groups"] == []
+
+
+@pytest.mark.unit
 def test_machine_note_is_information_never_a_task():
     """A machine note (a table row the active setup doesn't claim,
     MAPPING_PLAN §5.3) renders as a calm server-side row: synced band (never

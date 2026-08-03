@@ -96,27 +96,70 @@ Switch to the **CAM** workbench and click the **Loobric** button. A modeless
 window opens (FreeCAD stays usable beside it) with four tabs — Sync, Catalog,
 Machines, and Audit log.
 
+### Asset store mode (experimental, FreeCAD 1.1+)
+
+The 0.6.0 way to work: enable **"Serve the CAM tool library from Loobric"**
+in Edit → Preferences → CAM → Loobric, and FreeCAD's own tool library dock
+and editors show and edit server-backed tools — no separate sync ritual.
+Reads come from a local mirror (browsing works offline); your edits upload in
+the background a few seconds after you make them, and server-side changes
+arrive on their own every few minutes. Starting up never blocks the CAM UI:
+the initial fill (a full library download on a first run) happens in the
+background while FreeCAD stays usable. Sync health is always one glance away
+— the Loobric toolbar button changes color with sync status (green = in
+sync, yellow = starting or syncing, red = a conflict needs your decision,
+gray = offline, working from the mirror), and a status-bar widget spells out
+the same state;
+when something needs a decision (a tool changed on both sides), clicking the
+widget opens the Sync window filtered to exactly those items. Deleting a
+tool in FreeCAD deletes it on the server too — a copy is kept in the mirror's
+trash for 30 days. The first activation offers a one-time review of your
+existing local tools so you choose what gets imported. To try it for a single
+session instead, use the **Loobric asset store (experimental)** command in
+the CAM menu. On FreeCAD 1.0 everything below works as before.
+
 ### Sync
 
 The one place tools move between FreeCAD and the server. It shows a tree of every
 tool set and its tools, comparing your local tool directory against the server.
-Each changed row gets a direction:
+Each changed row's ↑ upload / ↓ download action follows directly from its
+status — you only choose what to include, with a checkbox. Rows with a safe
+direction come pre-checked; the checkbox on a tool-set (folder) row toggles
+every tool inside it, and the Apply button always states exactly what it will
+do ("Apply (3 uploads, 2 downloads)"). Nothing touches disk or the server
+until you press it.
 
-- upload local -> server
-- download server -> local
-- leave unsynced
+Rows with no safe default — a tool changed on **both** sides, or a deletion —
+have no checkbox. Double-click one to see a field-by-field, side-by-side
+comparison (the server marks each canonical field with the side that changed
+it) and choose a side; that choice applies immediately. To deliberately go
+against a row's suggested direction (say, discard local edits and take the
+server copy), use **Force download** / **Force upload** in the right-click
+menu.
 
-An **Out of sync only** filter hides everything that is already in sync. Set a
-direction on a tool-set (folder) row to apply it to every tool inside at once,
-then click **Apply Selected**. Nothing touches disk or the server until you
-apply.
-
-When a tool changed on both sides, double-click the row to see a field-by-field,
-side-by-side comparison and choose **Keep Local**, **Keep Server**, or **Skip**.
-The server marks each canonical field with the side that changed it.
-
+An **Out of sync only** filter hides everything that is already in sync.
 Right-click a row for management actions: inspect the record, rename, set tool
-type, delete on the server, or link a tool set to a machine.
+type, delete on the server, or check a tool set's setup status.
+
+A tool set created with **Create tool set from job** (see below) appears here
+read-only (📋): its setup status is visible, but it has no download action —
+it deliberately has no library file.
+
+### Create tool set from job
+
+The **Create tool set from job** command (next to the Loobric button) builds a
+Loobric tool set from the active Job's tools: each ToolController's tool
+number becomes the member's claim — the number your posted G-code will call.
+One confirmation shows the members, anything that can't be included (tools not
+saved to the tool library, or one tool used under two numbers — fix the job
+and re-run), tools that will be uploaded first, and a ⚠ when the job's copy of
+a tool differs from the library file. Two different tools claiming the same
+number stop the command: that job cannot run as posted.
+
+No FreeCAD tool library (`.fctl`) is written — your libraries stay yours. The
+set lives on the server; re-running the command updates it wholesale from the
+job (the link is stored on the Job as a `LoobricSetId` property, so it travels
+inside the `.FCStd`).
 
 ### Catalog
 
@@ -149,14 +192,20 @@ HTTP traffic. Inspecting a record's raw JSON is a right-click action on any row.
 
 - Custom shape files (`.fcstd` tool geometries) are not themselves transferred —
   tools reference shapes by name, and only the reference travels. Built-in
-  FreeCAD shapes resolve normally on both ends.
+  FreeCAD shapes resolve normally on both ends. In asset store mode, a pulled
+  tool whose custom shape is missing on this machine is named in the report
+  view (shape sync is a planned follow-up).
+- FreeCAD machine configs (`.fcm`) are never synced — by design, permanently.
+  They define postprocessing and simulation kinematics, a different concept
+  from a Loobric Machine.
 - Tool holder / assembly data is not modeled or synchronized.
 - After a download, reload the CAM tool library to see the changes in FreeCAD's
   editors.
 - A Job's `ToolController.ToolNumber` is a copy taken when the tool is added
-  to the Job; Loobric syncs the *library* number (the claim), not the Job's
-  copy. If the library number changes after a Job was built, update the
-  ToolController and repost — a post-time check is planned, not yet built.
+  to the Job; a `.fctl`-synced set carries the *library* number, not the Job's
+  copy. **Create tool set from job** closes this gap for the job that matters
+  (its claims come from the ToolControllers themselves), but a post-time
+  check against the active setup is still planned, not yet built.
 
 ## Links
 

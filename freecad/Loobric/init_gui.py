@@ -50,10 +50,13 @@ def initialize():
     try:
         class LoobricManipulator:
             def modifyToolBars(self):
-                return [{"append" : "Loobric_Sync", "toolBar" : "Tool Commands"}]
-                
+                return [{"append" : "Loobric_Sync", "toolBar" : "Tool Commands"},
+                        {"append" : "Loobric_SetFromJob", "toolBar" : "Tool Commands"}]
+
             def modifyMenuBar(self):
-                return [{"insert" : "Loobric_Sync", "menuItem" : "CAM_ToolBitDock", "after": ""}]
+                return [{"insert" : "Loobric_Sync", "menuItem" : "CAM_ToolBitDock", "after": ""},
+                        {"insert" : "Loobric_SetFromJob", "menuItem" : "CAM_ToolBitDock", "after": ""},
+                        {"insert" : "Loobric_AssetStore", "menuItem" : "CAM_ToolBitDock", "after": ""}]
 
 
         App.Console.PrintMessage("Creating workbench manipulator...\n")
@@ -67,7 +70,37 @@ def initialize():
         App.Console.PrintError(f"Failed to register workbench manipulator: {e}\n")
         import traceback
         traceback.print_exc()
-    
+
+    # Auto-activation of the asset store: when the CAM workbench comes up and
+    # the preference is on, store mode starts by itself (storemode runs
+    # camassets setup first, then the swap). FreeCAD < 1.1 or a disabled
+    # preference: the hook is a no-op.
+    try:
+        try:
+            from freecad.Loobric import storemode
+        except ImportError:
+            import storemode
+        Gui.getMainWindow().workbenchActivated.connect(storemode.auto_activate)
+        App.Console.PrintMessage("Loobric asset-store hook registered\n")
+    except Exception as e:
+        App.Console.PrintError(f"Failed to register asset-store hook: {e}\n")
+
+    # The Loobric toolbar button doubles as the sync-status indicator — the
+    # icon recolors: green (in sync), yellow (starting/syncing), red
+    # (conflicts held for a decision), gray (offline). FreeCAD < 1.1 has no
+    # asset system — no store mode, no coloring.
+    try:
+        try:
+            from freecad.Loobric import LoobricStatusWidget
+        except ImportError:
+            import LoobricStatusWidget
+        LoobricStatusWidget.install_badge()
+    except ImportError:
+        pass
+    except Exception as e:
+        App.Console.PrintError(f"Failed to install the Loobric status "
+                               f"badge: {e}\n")
+
     App.Console.PrintMessage("Loobric addon initialized\n")
 
 

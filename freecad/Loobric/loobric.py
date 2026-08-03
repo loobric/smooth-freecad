@@ -496,6 +496,18 @@ class Client:
     def whoami(self) -> Dict[str, Any]:
         return self._call("GET", "/auth/me")
 
+    def key_info(self) -> Dict[str, Any]:
+        """Introspect the presented credential (server ≥ 0.8.0).
+
+        Returns the key's audit identity (channel + api_key_id), name, its
+        EFFECTIVE door scopes, and explicit read_only / legacy flags —
+        needs nothing beyond a valid credential, so a read-only key can
+        learn it is read-only without provoking a 403. On a session or in
+        solo mode the response carries the channel and NO scopes key
+        (sessions are unscoped). A NotFound means the server predates the
+        endpoint."""
+        return self._call("GET", "/auth/key")
+
     def server_version(self) -> Dict[str, Any]:
         """The server's build identity ({version, commit}). Unauthenticated, so
         it works before login; a NotFound means the server predates the endpoint

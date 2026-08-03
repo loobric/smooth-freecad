@@ -19,8 +19,8 @@ Requirements:
 - FreeCAD 1.1 or later with the CAM workbench
 - A Loobric server (self-hosted or hosted) - see https://loobric.com
 - Standard library only: no extra Python packages</description>
-  <version>0.4.0</version>
-  <date>2026-06-23</date>
+  <version>0.6.2</version>
+  <date>2026-08-03</date>
   <maintainer email="sliptonic@gmail.com">Brad Collette</maintainer>
   <license file="LICENSE">MIT</license>
   <url type="repository" branch="master">https://github.com/loobric/loobric-freecad</url>

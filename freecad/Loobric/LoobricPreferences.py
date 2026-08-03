@@ -36,6 +36,7 @@ class LoobricPreferencePage:
         self.key_edit = self.form.findChild(QtGui.QWidget, "apiKeyEdit")
         self.show_key_checkbox = self.form.findChild(QtGui.QCheckBox, "showKeyCheckbox")
         self.auto_sync_checkbox = self.form.findChild(QtGui.QCheckBox, "autoSyncCheckbox")
+        self.asset_store_checkbox = self.form.findChild(QtGui.QCheckBox, "assetStoreCheckbox")
         self.test_button = self.form.findChild(QtGui.QPushButton, "testButton")
         self.status_label = self.form.findChild(QtGui.QLabel, "statusLabel")
         
@@ -82,6 +83,9 @@ class LoobricPreferencePage:
                     self.url_edit.setText(url)
                     self.key_edit.setText(config.get("api_key", ""))
                     self.auto_sync_checkbox.setChecked(config.get("auto_sync", False))
+                    if self.asset_store_checkbox is not None:
+                        self.asset_store_checkbox.setChecked(
+                            config.get("asset_store", False))
             # Ensure checkbox state applies immediately
             #self.toggle_key_visibility(self.show_key_checkbox.isChecked())
         except Exception as e:
@@ -90,14 +94,24 @@ class LoobricPreferencePage:
     def saveSettings(self):
         """Save settings to config file (called by FreeCAD)."""
         try:
-            config = {
+            # Merge over the existing file — other keys (e.g. state the
+            # asset store writes) must survive a preferences save.
+            config_path = self.get_config_path()
+            config = {}
+            if config_path.exists():
+                try:
+                    with open(config_path) as f:
+                        config = json.load(f)
+                except (OSError, ValueError):
+                    config = {}
+            config.update({
                 # Save normalized base URL (without trailing '/api')
                 "api_url": self._normalize_url(self.url_edit.text().strip()),
                 "api_key": self.key_edit.text().strip(),
-                "auto_sync": self.auto_sync_checkbox.isChecked()
-            }
-            
-            config_path = self.get_config_path()
+                "auto_sync": self.auto_sync_checkbox.isChecked(),
+            })
+            if self.asset_store_checkbox is not None:
+                config["asset_store"] = self.asset_store_checkbox.isChecked()
             with open(config_path, 'w') as f:
                 json.dump(config, f, indent=2)
             
