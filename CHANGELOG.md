@@ -3,6 +3,99 @@
 All notable changes to **loobric-freecad** (the FreeCAD CAM client for Loobric) are
 recorded here. This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.7.0] — 2026-08-16
+
+Cutting data presets, slice 2 (server ≥ 0.13.0; loobric-server
+`docs/PRESETS.md`): FreeCAD's F&S presets stop being passthrough-only and
+start feeding the server's derived, source-preserved union.
+
+### Added
+- **Preset promotion through the contribution door** (`presetsync.py`).
+  Every push path (`push_bit`, `upload_bit`, create-from-catalog) now
+  additionally translates the bit's native presets (PR #30078 shape:
+  `name` / `material_hint` / `op_type_hint` / `surface_speed` m/min /
+  `chipload` mm/tooth / `vert_feed_ratio`) into the ratified normal form
+  and contributes them as origin `freecad` — replace-own on
+  `(origin, label)`, so re-syncs update instead of duplicating. The label
+  is the preset's name, else FreeCAD's own `material / op` summary, so
+  server entries match what the user sees in the Presets tab. The raw
+  `presets` key keeps riding the client section untouched — promotion is
+  additive, round-trip stays lossless.
+- **Vocabulary mapping:** `profile/pocket/slot/drill/adaptive` map to the
+  server's ratified op_type enum; the verbatim FreeCAD op always rides
+  the extras bag, and an unmappable one (`surface_finish`) leaves
+  `op_type` honestly absent.
+- **Floor honesty:** a preset with no material name (or UUID-only hint)
+  cannot be normalized — it stays client-section-only with a log line,
+  never guessed.
+- **Prune on delete:** freecad-origin server entries whose preset was
+  deleted locally are removed on the next sync (including deleting the
+  last one); a key without the delete scope gets a pointer to the Web UI
+  instead of a failure. Catalog-scope entries in the union are never
+  touched. A server without the preset door (pre-0.13.0) logs and moves
+  on — sync itself never fails over presets.
+
+- **External presets become visible in FreeCAD** (the pull side).
+  Regeneration (`instance_to_fctb`) materializes the server union's
+  non-freecad entries into the native presets list — name prefixed with
+  the origin (`manufacturer: 6061 profiling`), units converted into the
+  native fixed units (sfm → m/min, in → mm; an unknown unit drops that
+  value, never guesses), server op_types reverse-mapped (a round-tripped
+  verbatim `freecad_op_type` in extras wins). Each is marked
+  `loobric_external`, so promotion never re-contributes it and the prune
+  never touches it; stale copies are rebuilt from the current union on
+  every regeneration, so a preset edited or deleted elsewhere refreshes
+  here. The linked catalog type's entries ride in too (one
+  `list_catalogs` call per plan, not per tool) — a tool created from a
+  Harvey catalog record shows the manufacturer's chart immediately.
+  Editing an external preset in FreeCAD rebuilds the dict without the
+  marker: the edit FORKS it into your own freecad-origin preset on the
+  next push, which is exactly what changing someone else's numbers means.
+
+- **The Catalog tab browses by catalog** (server ≥ 0.14.0): records
+  group under collapsible folder nodes — one per catalog, name + count,
+  expanded by default — with an *Uncataloged* node for the pile. A record
+  in several catalogs appears under each (membership is organization,
+  never identity). Folders aren't selectable; create-tool-from-catalog
+  works on record rows exactly as before. An older server (or no
+  catalogs yet) degrades to the flat list. The grouping model
+  (`viewmodel.catalog_tree`) is pure and headless-tested.
+- **Vendored `loobric.py` refreshed** to match loobric-cli: the v1
+  manufacturer-catalog verbs (whose `/catalogs` route changed contract
+  with the server's v1 rip-out) are replaced by the Catalog-entity verbs
+  (`create/list/get/rename/set_members/delete`), and the cutting-data
+  preset verbs from cli 1.6.0 are folded in — `LoobricApi`'s preset
+  helpers now delegate to them, and its old `list_catalogs`/`get_catalog`
+  aliases (which shadowed the entity verbs) are gone: callers name
+  `list_catalog_records` when they mean records.
+
+### Fixed
+- **The clobber loop: newer server changes mis-classified as "changed
+  locally"** (field finding 2026-08-16 — a stale mirror file re-uploaded
+  every refresh, overwriting a corrected shank diameter ~16 times).
+  Two defects, both fixed:
+  - Bits now classify against a **last-synced snapshot** (like libraries
+    always have) instead of the live server section. The live section
+    always matches whoever pushed last, so when both sides had moved,
+    the other side's stale content classified as a confident "push";
+    with the true 3-way base it is a HELD conflict. Legacy state without
+    a snapshot falls back to the old base until the next sync records one.
+  - **Stale-file guard:** a mirror file whose `loobric.version` is behind
+    the version this install already synced is a resurrected stale copy
+    (an old cached doc rewritten over the mirror) — its "local changes"
+    predate upstream truth and are held as a conflict naming both
+    versions, never auto-pushed. A genuine fresh edit carries the
+    current stamp and pushes as before, even across unrelated
+    server-side version bumps (usage hours, labels, presets).
+- **Apply no longer dies on filesystem drift** (field crash 2026-08-16):
+  resolving a `deleted_server` item whose local file had already vanished
+  between plan and apply raised FileNotFoundError and aborted the whole
+  batch. Deleting an already-deleted file is now success (the goal state
+  is "file gone"), and OSError joins the per-item error handling so one
+  stale row errors that item and moves on.
+- `CLIENT_VERSION` stamped on section writes had gone stale at 0.5.0;
+  it now tracks the addon version.
+
 ## [0.6.2] — 2026-08-03
 
 Startup responsiveness and at-a-glance sync status, from real-world use of
