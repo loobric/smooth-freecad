@@ -41,8 +41,53 @@ class FakeServer:
         self.setups = []      # active setup rows ({machine_id, tool_set_id})
         self.setup_views = {} # machine_id -> the derived setup view
         self.machines = {}    # id -> sectioned MachineRecord
+        self.presets = {}     # (record_id, origin, label) -> entry dict
+        self.catalog_groups = {}  # id -> Catalog entity (named collection)
         self._n = 0
         self._seed_catalog()
+
+    # -- Catalogs: named collections of catalog records (server >= 0.14.0) ---
+
+    def list_catalogs(self):
+        return list(self.catalog_groups.values())
+
+    def create_catalog(self, name, actor="human@cli"):
+        cid = self._next("catgrp")
+        row = self._blank(cid)
+        row["canonical"] = {"name": self._field(name),
+                            "members": self._field([])}
+        self.catalog_groups[cid] = row
+        return row
+
+    def set_catalog_members(self, catalog_id, record_ids, actor="human@cli"):
+        row = self.catalog_groups[catalog_id]
+        row["canonical"]["members"] = self._field(list(dict.fromkeys(record_ids)))
+        row["internal"]["version"] += 1
+        return row
+
+    # -- cutting data presets (the contribution door; server >= 0.13.0) ------
+
+    def contribute_preset(self, record_id, body):
+        key = (record_id, body["origin"], body["label"])
+        entry = dict(body)
+        entry.pop("actor", None)
+        entry["id"] = self.presets[key]["id"] if key in self.presets \
+            else self._next("preset")
+        entry["source"] = "asserted:%s" % body.get("actor", "freecad")
+        entry["scope"] = "instance"
+        self.presets[key] = entry
+        return self.instances[record_id]
+
+    def list_instance_presets(self, record_id):
+        return [dict(e) for (rid, _, _), e in sorted(self.presets.items())
+                if rid == record_id]
+
+    def delete_instance_preset(self, record_id, entry_id):
+        for key, entry in list(self.presets.items()):
+            if key[0] == record_id and entry["id"] == entry_id:
+                del self.presets[key]
+                return self.instances[record_id]
+        raise KeyError(entry_id)
 
     # -- setups (the machine↔set relationship; read-only from the CAM side) --
 

@@ -37,7 +37,7 @@ NotFound = loobric.NotFound
 # This client's identity (the `clients` map key) and software version, stamped on
 # every section write; and the actor on human-initiated operator-lane acts.
 CLIENT_NAME = mapping.CLIENT_NAME        # "freecad"
-CLIENT_VERSION = "0.5.0"
+CLIENT_VERSION = "0.7.0"
 HUMAN_ACTOR = "human@freecad"
 
 # Public resource tokens for the generic canonical doors (assert / section sync).
@@ -125,14 +125,36 @@ class LoobricApi(loobric.Client):
     def delete_instance(self, record_id):
         return self.delete_tool_record(record_id)
 
+    # -- Cutting data presets (server >= 0.13.0) ---------------------------
+    # These mirror loobric-cli 1.6.0's contribute_preset/list_presets verbs;
+    # fold into the vendored loobric.py on its next refresh.
+
+    def contribute_preset(self, record_id, body):
+        """The audited contribution door: one preset (a recommendation with
+        a source), replace-own on (origin, label). ``body`` is the ready
+        contribution dict from presetsync.translate; the actor is this
+        client's identity — origin and transcriber are both 'freecad' for
+        the client's own presets. (This dict-shaped adapter wraps the
+        vendored generic verb the same way put_instance_section wraps
+        sync_client_section.)"""
+        payload = dict(body)
+        payload.setdefault("actor", CLIENT_NAME)
+        return self._call("POST",
+                          f"/{INSTANCES}/{record_id}/presets", body=payload)
+
+    def list_instance_presets(self, record_id):
+        """The instance's preset union (own + linked catalog, scope-marked)."""
+        return self.list_presets(INSTANCES, record_id)
+
+    def delete_instance_preset(self, record_id, entry_id):
+        """Prune one contribution (the delete door; may 403 on scoped keys)."""
+        return self.delete_preset(INSTANCES, record_id, entry_id)
+
     # -- ToolCatalogRecords (browse + create-from) — M2 --------------------
-
-    def list_catalogs(self):
-        """The catalog records available to browse (ToolCatalogRecords)."""
-        return self.list_catalog_records()
-
-    def get_catalog(self, record_id):
-        return self.get_catalog_record(record_id)
+    # NOTE: the record verbs are list_catalog_records/get_catalog_record;
+    # bare list_catalogs/get_catalog are the vendored CATALOG-entity verbs
+    # (named collections, server >= 0.14.0) — the old shadowing aliases that
+    # hid them are gone, callers name what they mean.
 
     def create_from_catalog(self, catalog_id, name=None):
         """Create a new UNBOUND instance from a catalog type (the catalog->

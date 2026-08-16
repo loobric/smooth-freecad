@@ -38,6 +38,8 @@ import copy
 import re
 from collections import namedtuple
 
+from . import presetsync
+
 # parameter name -> canonical geometry key (quantity-valued)
 QUANTITY_PARAMS = {
     "Diameter": "diameter",
@@ -240,7 +242,7 @@ def record_to_instance_sections(fctb_doc, shape=None, client_item_id=None):
                             asserts=asserts)
 
 
-def instance_to_fctb(record):
+def instance_to_fctb(record, catalog_presets=None):
     """Regenerate a .fctb document from a sectioned ToolInstanceRecord.
 
     Strategy (lossless first, canonical wins on conflict):
@@ -309,6 +311,21 @@ def instance_to_fctb(record):
         value = _field_value(geometry.get(key))
         if value is not None and params.get(param) != value:
             params[param] = int(value)
+
+    # External cutting data presets (docs/PRESETS.md slice 2, pull side):
+    # entries in the server's union that did NOT come from this client are
+    # materialized into the native presets list, marked, so they're visible
+    # (and usable) in FreeCAD's Presets tab. FreeCAD's own presets in the
+    # base ride through untouched; previously-materialized external copies
+    # are DISCARDED and rebuilt from the current union, so a preset edited
+    # or removed elsewhere refreshes here. ``catalog_presets`` carries the
+    # linked catalog type's entries (the record itself only holds its own).
+    own_presets, _stale = presetsync.split_native(doc.get("presets"))
+    union = list(((canonical.get("presets") or {}).get("value")) or [])
+    union += list(catalog_presets or [])
+    external = presetsync.externalize(union)
+    if own_presets or external or "presets" in doc:
+        doc["presets"] = own_presets + external
 
     doc["loobric"] = {"record_id": internal.get("id"),
                      "version": internal.get("version")}

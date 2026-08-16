@@ -32,7 +32,7 @@ Identity rules (the production lesson — never create duplicates):
 import json
 import os
 
-from . import mapping
+from . import mapping, presetsync
 from .client import LoobricError
 
 
@@ -304,6 +304,19 @@ def _load_sync_state(tools_dir):
     state.setdefault("records", {})       # instance id -> basename
     state.setdefault("tool_sets", {})     # set id -> basename
     state.setdefault("set_snapshots", {})  # set id -> last-synced .fctl doc
+    # Bits get the same true 3-way base a library's membership already has:
+    # the doc as of THIS install's last sync. Classifying against the LIVE
+    # server section instead (the pre-0.7.0 behavior, still the fallback for
+    # records synced before this state existed) mis-attributes changes when
+    # both sides move — the side that pushed last looks like the base, and
+    # the other side's stale content classifies as a confident "push"
+    # (field finding 2026-08-16: the 3/4" endmill clobber loop).
+    state.setdefault("bit_snapshots", {})  # instance id -> last-synced .fctb doc
+    # And the server version each file last synced at: a file whose own
+    # loobric.version is BEHIND this is a resurrected stale copy (an old
+    # cached doc rewritten over the mirror) — its "local changes" must never
+    # auto-push over newer upstream truth.
+    state.setdefault("bit_versions", {})   # instance id -> version at last sync
     return state
 
 
@@ -334,6 +347,34 @@ def _readopt_tool_set(basename, server_sets_by_id, state):
 # Plan (read-only): classify every local file and every server record
 # ---------------------------------------------------------------------------
 
+def _catalog_type_id(record):
+    return (((record or {}).get("canonical") or {}).get("catalog_type_id")
+            or {}).get("value")
+
+
+def _catalog_presets_map(client, records):
+    """catalog_type_id -> that catalog type's preset entries, so regeneration
+    can materialize the linked type's external presets (the instance record
+    only carries its OWN entries). One list call for the whole plan, never one
+    per tool; empty on any failure — presets must never break a plan."""
+    wanted = {cid for cid in (_catalog_type_id(r) for r in records) if cid}
+    if not wanted:
+        return {}
+    try:
+        catalogs = client.list_catalog_records()
+    except Exception:
+        return {}
+    out = {}
+    for catalog in catalogs:
+        cid = _record_id(catalog)
+        if cid in wanted:
+            entries = (((catalog.get("canonical") or {}).get("presets")
+                        or {}).get("value")) or []
+            if entries:
+                out[cid] = entries
+    return out
+
+
 def plan_sync(tools_dir, client, log=lambda msg: None):
     """Compute the sync plan without touching anything.
 
@@ -362,6 +403,7 @@ def plan_sync(tools_dir, client, log=lambda msg: None):
     server_sets = client.list_sets()
     server_record_ids = {_record_id(r) for r in server_records}
     server_set_ids = {_record_id(s) for s in server_sets}
+    catalog_presets = _catalog_presets_map(client, server_records)
 
     by_record_id, by_fctb_id, by_filename = {}, {}, {}
     local_docs = {}
@@ -439,14 +481,35 @@ def plan_sync(tools_dir, client, log=lambda msg: None):
                 })
             continue
         matched_paths.add(path)
-        regenerated = mapping.instance_to_fctb(record)
-        action = _classify(local_docs[path], base, regenerated)
+        regenerated = mapping.instance_to_fctb(
+            record, catalog_presets.get(_catalog_type_id(record)))
+        # True 3-way: classify against what THIS install last synced, not the
+        # live section (which the last pusher always matches). Legacy state
+        # without a snapshot falls back to the old section-as-base behavior.
+        snapshot = state["bit_snapshots"].get(rid)
+        action = _classify(local_docs[path], snapshot or base, regenerated)
         detail = {
             "unchanged": "in sync",
             "pull": "changed on the server - apply downloads it",
             "push": "changed locally - apply uploads it",
             "conflict": "changed on BOTH sides - choose a side below",
         }[action]
+        # Stale-file guard: a file carrying an OLDER loobric.version than this
+        # install already synced is a resurrected stale copy (a cached doc
+        # rewritten over the mirror) — its "local changes" predate newer
+        # upstream truth and must never auto-push over it.
+        if action == "push":
+            file_version = (local_docs[path].get("loobric") or {}).get("version")
+            synced_version = state["bit_versions"].get(rid)
+            if isinstance(file_version, int) and \
+                    isinstance(synced_version, int) and \
+                    file_version < synced_version:
+                action = "conflict"
+                detail = ("local file is based on server version %d but this "
+                          "install already synced version %d - the file looks "
+                          "like a stale copy rewritten over the mirror; "
+                          "download recommended" % (file_version,
+                                                    synced_version))
         basename = os.path.basename(path)
         items.append({
             "key": "bit:%s" % basename, "kind": "bit",
@@ -698,9 +761,12 @@ def create_tool_from_catalog(tools_dir, client, catalog_record, name=None,
     # link), exactly as the server's create-from-catalog leaves it.
     sections = mapping.record_to_instance_sections(doc, client_item_id=basename)
     client.put_instance_section(rid, sections.data, sections.client_item_id)
+    presetsync.promote(client, rid, doc, log=log)
 
     state = _load_sync_state(tools_dir)
     state["records"][rid] = basename
+    state["bit_snapshots"][rid] = _sans_loobric(doc)
+    state["bit_versions"][rid] = (doc.get("loobric") or {}).get("version")
     _save_sync_state(tools_dir, state)
 
     log("CREATE from catalog '%s' -> %s [%s] (record %s, unbound, synced)"
@@ -735,11 +801,14 @@ def upload_bit(tools_dir, client, path, log=lambda msg: None):
             % (basename, rid[:8]))
     results = client.assert_instance_fields(rid, sections.asserts,
                                             actor=mapping.CLIENT_NAME)
+    presetsync.promote(client, rid, doc, log=log)
     version = _record_version(results[-1]) if results \
         else _record_version(client.get_instance(rid))
     _writeback_identity(path, rid, version)
     state = _load_sync_state(tools_dir)
     state["records"][rid] = basename
+    state["bit_snapshots"][rid] = _sans_loobric(doc)
+    state["bit_versions"][rid] = version
     _save_sync_state(tools_dir, state)
     return rid
 
@@ -781,6 +850,9 @@ def apply_sync(tools_dir, client, plan, decisions, shapes=None, log=lambda msg: 
     summary = {"pushed": 0, "pulled": 0, "skipped": 0, "deleted": 0,
                "errors": []}
     shapes = shapes or {}
+    catalog_presets = _catalog_presets_map(
+        client, [i["record"] for i in plan.get("items", [])
+                 if i.get("record")])
     state = _load_sync_state(tools_dir)
     bit_dir = os.path.join(tools_dir, "Bit")
     lib_dir = os.path.join(tools_dir, "Library")
@@ -819,11 +891,16 @@ def apply_sync(tools_dir, client, plan, decisions, shapes=None, log=lambda msg: 
         # dimensions) through the assert door — including a type correction.
         results = client.assert_instance_fields(rid, sections.asserts,
                                                 actor=mapping.CLIENT_NAME)
+        # Promote F&S presets through the contribution door (replace-own;
+        # translation is the client's job — docs/PRESETS.md).
+        presetsync.promote(client, rid, doc, log=log)
         version = _record_version(results[-1]) if results \
             else _record_version(client.get_instance(rid))
         _writeback_identity(item["path"], rid, version)
         record_id_by_path[item["basename"]] = rid
         state["records"][rid] = item["basename"]
+        state["bit_snapshots"][rid] = _sans_loobric(doc)
+        state["bit_versions"][rid] = version
         summary["pushed"] += 1
         log("  uploaded %s (record %s)" % (item["basename"], rid[:8]))
 
@@ -839,7 +916,8 @@ def apply_sync(tools_dir, client, plan, decisions, shapes=None, log=lambda msg: 
                                    actor=mapping.CLIENT_NAME)
             record = client.get_instance(rid)
 
-        regenerated = mapping.instance_to_fctb(record)
+        regenerated = mapping.instance_to_fctb(
+            record, catalog_presets.get(_catalog_type_id(record)))
         path = item["path"]
         if not path:
             cii = _client_item_id(record) or ""
@@ -851,6 +929,9 @@ def apply_sync(tools_dir, client, plan, decisions, shapes=None, log=lambda msg: 
         basename = os.path.basename(path)
         record_id_by_path[basename] = rid
         state["records"][rid] = basename
+        state["bit_snapshots"][rid] = _sans_loobric(regenerated)
+        state["bit_versions"][rid] = (regenerated.get("loobric")
+                                      or {}).get("version")
         summary["pulled"] += 1
         log("  DOWNLOAD record %s -> %s [%s]%s (stays linked to the record)"
             % (rid[:8], basename, regenerated.get("shape-type", "?"),
@@ -939,6 +1020,8 @@ def apply_sync(tools_dir, client, plan, decisions, shapes=None, log=lambda msg: 
                 if item["kind"] == "bit":
                     client.delete_instance(rid)
                     state["records"].pop(rid, None)
+                    state["bit_snapshots"].pop(rid, None)
+                    state["bit_versions"].pop(rid, None)
                 else:
                     client.delete_set(rid)
                     state["tool_sets"].pop(rid, None)
@@ -946,11 +1029,21 @@ def apply_sync(tools_dir, client, plan, decisions, shapes=None, log=lambda msg: 
                 summary["deleted"] += 1
                 log("deleted on server: %s" % item["name"])
             elif item["action"] == "deleted_server" and decision == "pull":
-                # explicit human choice: delete the local file too
-                os.remove(item["path"])
+                # explicit human choice: delete the local file too. The goal
+                # state is "file gone" — a file already removed between plan
+                # and apply (a stale plan window, another writer) is success,
+                # not an error (field crash 2026-08-16: Default.fctl).
+                try:
+                    os.remove(item["path"])
+                except FileNotFoundError:
+                    log("  (file already gone: %s)" % item["basename"])
                 if item["kind"] == "bit":
-                    state["records"] = {k: v for k, v in state["records"].items()
-                                        if v != item["basename"]}
+                    dead = [k for k, v in state["records"].items()
+                            if v == item["basename"]]
+                    for rid in dead:
+                        state["records"].pop(rid, None)
+                        state["bit_snapshots"].pop(rid, None)
+                        state["bit_versions"].pop(rid, None)
                 else:
                     state["tool_sets"] = {k: v for k, v in state["tool_sets"].items()
                                           if v != item["basename"]}
@@ -966,7 +1059,10 @@ def apply_sync(tools_dir, client, plan, decisions, shapes=None, log=lambda msg: 
                 push_bit(item) if decision == "push" else pull_bit(item)
             else:
                 push_library(item) if decision == "push" else pull_library(item)
-        except (SyncApplyError, LoobricError) as e:
+        except (SyncApplyError, LoobricError, OSError) as e:
+            # OSError included: filesystem drift (a file vanishing or
+            # locked between plan and apply) errors THIS item and moves on
+            # — one stale row must never abort the rest of the batch.
             summary["errors"].append("%s: %s" % (item["name"], e))
             log("  ! %s: %s" % (item["name"], e))
 
