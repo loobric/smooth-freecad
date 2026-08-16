@@ -124,6 +124,40 @@ def catalog_rows(catalog_records):
     return rows
 
 
+def catalog_tree(catalog_records, catalogs):
+    """Render model for the GROUPED catalog browse (server >= 0.14.0):
+    one node per catalog — ``{id, name, rows}`` sorted by name — holding its
+    member records as :func:`catalog_rows` rows, then an ``Uncataloged``
+    node (id None) for records in no catalog. A record may appear under
+    several catalogs: membership is organization, never identity, and the
+    tree shows it honestly rather than deduping.
+
+    ``catalogs`` empty or None (an older server, or none created yet)
+    degrades to one flat anonymous node ``{id: None, name: None, rows}`` —
+    the widget renders that without folder chrome. Pure: no Qt, no I/O."""
+    rows_by_id = {row["id"]: row for row in catalog_rows(catalog_records)}
+    groups = []
+    grouped = set()
+    for group in sorted(catalogs or [],
+                        key=lambda g: str(((g.get("canonical") or {})
+                                           .get("name") or {}).get("value") or "")):
+        canonical = group.get("canonical") or {}
+        member_ids = ((canonical.get("members") or {}).get("value")) or []
+        rows = [rows_by_id[i] for i in member_ids if i in rows_by_id]
+        grouped.update(row["id"] for row in rows)
+        groups.append({
+            "id": (group.get("internal") or {}).get("id"),
+            "name": ((canonical.get("name") or {}).get("value")) or "(unnamed)",
+            "rows": rows,
+        })
+    loose = [row for rid_, row in rows_by_id.items() if rid_ not in grouped]
+    if not groups:
+        return [{"id": None, "name": None, "rows": list(rows_by_id.values())}]
+    if loose:
+        groups.append({"id": None, "name": "Uncataloged", "rows": loose})
+    return groups
+
+
 # ---------------------------------------------------------------------------
 # Status model: Existence × Sync, kept deliberately separate
 # ---------------------------------------------------------------------------

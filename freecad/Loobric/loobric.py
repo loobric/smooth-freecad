@@ -600,21 +600,66 @@ class Client:
     def update_user_roles(self, user_id: str, **fields) -> Dict[str, Any]:
         return self._call("PATCH", f"/users/{user_id}/roles", body=dict(fields))
 
-    # -- manufacturer catalogs ----------------------------------------------
-    def list_catalogs(self) -> Any:
-        return self._call("GET", "/catalogs")
+    # -- catalogs: named collections of catalog records (server >= 0.14.0;
+    #    replaces the v1 manufacturer-catalog verbs — vendored from
+    #    loobric-cli, keep in step with it) ---------------------------------
+    def list_catalogs(self) -> List[Dict[str, Any]]:
+        return self._call("GET", "/catalogs").get("items", [])
 
     def get_catalog(self, catalog_id: str) -> Dict[str, Any]:
         return self._call("GET", f"/catalogs/{catalog_id}")
 
-    def catalog_analytics(self, catalog_id: str) -> Dict[str, Any]:
-        return self._call("GET", f"/catalogs/{catalog_id}/analytics")
+    def create_catalog(self, name: str,
+                       actor: str = "human@cli") -> Dict[str, Any]:
+        return self._call("POST", "/catalogs",
+                          body={"name": name, "actor": actor})
 
-    def create_catalog(self, **fields) -> Dict[str, Any]:
-        return self._call("POST", "/catalogs", body=dict(fields))
+    def rename_catalog(self, catalog_id: str, name: str,
+                       actor: str = "human@cli") -> Dict[str, Any]:
+        return self._call("POST", f"/catalogs/{catalog_id}/rename",
+                          body={"name": name, "actor": actor})
 
-    def update_catalog(self, catalog_id: str, **fields) -> Dict[str, Any]:
-        return self._call("PATCH", f"/catalogs/{catalog_id}", body=dict(fields))
+    def set_catalog_members(self, catalog_id: str, record_ids: List[str],
+                            actor: str = "human@cli") -> Dict[str, Any]:
+        return self._call("POST", f"/catalogs/{catalog_id}/members",
+                          body={"members": list(record_ids), "actor": actor})
+
+    def delete_catalog(self, catalog_id: str) -> Dict[str, Any]:
+        return self._call("DELETE", f"/catalogs/{catalog_id}")
+
+    # -- cutting data presets (server >= 0.13.0; vendored from
+    #    loobric-cli 1.6.0) -------------------------------------------------
+    def contribute_preset(self, resource: str, record_id: str,
+                          origin: str, label: str, material: Dict[str, Any],
+                          op_type: Optional[str] = None,
+                          vc: Optional[Dict[str, Any]] = None,
+                          fz: Optional[Dict[str, Any]] = None,
+                          ratio: Optional[Dict[str, Any]] = None,
+                          extras: Optional[Dict[str, Any]] = None,
+                          machine_id: Optional[str] = None,
+                          actor: str = "human@cli") -> Dict[str, Any]:
+        body: Dict[str, Any] = {"origin": origin, "label": label,
+                                "material": material, "actor": actor}
+        for key, value in (("op_type", op_type), ("vc", vc), ("fz", fz),
+                           ("ratio", ratio), ("extras", extras),
+                           ("machine_id", machine_id)):
+            if value is not None:
+                body[key] = value
+        return self._call("POST", f"/{resource}/{record_id}/presets",
+                          body=body)
+
+    def list_presets(self, resource: str, record_id: str,
+                     **filters: Any) -> List[Dict[str, Any]]:
+        from urllib.parse import urlencode
+        params = {k: v for k, v in filters.items() if v is not None}
+        qs = ("?" + urlencode(params)) if params else ""
+        return self._call("GET", f"/{resource}/{record_id}/presets{qs}"
+                          ).get("presets", [])
+
+    def delete_preset(self, resource: str, record_id: str,
+                      entry_id: str) -> Dict[str, Any]:
+        return self._call("DELETE",
+                          f"/{resource}/{record_id}/presets/{entry_id}")
 
     # -- change detection ----------------------------------------------------
     def changes_max_version(self, entity_type: str) -> Dict[str, Any]:

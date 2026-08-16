@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pytest
 
-from freecad.Loobric import sync
+from freecad.Loobric import sync, viewmodel
 from conftest import FakeServer
 
 
@@ -113,3 +113,68 @@ def test_created_instance_is_tracked_and_matched_by_next_plan(tools_dir):
                 if (i.get("record") or {}).get("internal", {}).get("id") == inst_id)
     assert item["path"] is not None                    # matched to its file
     assert item["action"] not in ("new_local", "new_server", "deleted_local")
+
+
+# ---------------------------------------------------------------------------
+# The grouped catalog browse (server >= 0.14.0): viewmodel.catalog_tree
+# ---------------------------------------------------------------------------
+
+def _seed_records(server, n=3):
+    out = []
+    for i in range(n):
+        rec = server._blank(server._next("cat"))
+        rec["canonical"] = {"name": server._field("rec %d" % i),
+                            "manufacturer": server._field("Maker"),
+                            "product_code": server._field("PC-%d" % i)}
+        server.catalogs[rec["internal"]["id"]] = rec
+        out.append(rec["internal"]["id"])
+    return out
+
+
+def test_catalog_tree_groups_and_uncataloged():
+    server = FakeServer()
+    r1, r2, r3 = _seed_records(server)
+    g = server.create_catalog("Harvey 2026")
+    server.set_catalog_members(g["internal"]["id"], [r1, r2])
+    tree = viewmodel.catalog_tree(server.list_catalog_records(),
+                                  server.list_catalogs())
+    names = [n["name"] for n in tree]
+    assert names[0] == "Harvey 2026"
+    assert names[-1] == "Uncataloged"
+    assert [r["id"] for r in tree[0]["rows"]] == [r1, r2]
+    uncat = [r["id"] for r in tree[-1]["rows"]]
+    assert r3 in uncat and r1 not in uncat
+
+
+def test_catalog_tree_multi_membership_shows_record_twice():
+    # Membership is organization, never identity — no deduping across groups.
+    server = FakeServer()
+    (r1,) = _seed_records(server, 1)
+    a = server.create_catalog("import")
+    b = server.create_catalog("curated")
+    server.set_catalog_members(a["internal"]["id"], [r1])
+    server.set_catalog_members(b["internal"]["id"], [r1])
+    tree = viewmodel.catalog_tree(server.list_catalog_records(),
+                                  server.list_catalogs())
+    holders = [n["name"] for n in tree if any(r["id"] == r1 for r in n["rows"])]
+    assert holders == ["curated", "import"]            # sorted by name
+
+
+def test_catalog_tree_degrades_flat_without_groups():
+    # Old server / no catalogs yet: one anonymous node, no folder chrome.
+    server = FakeServer()
+    _seed_records(server, 2)
+    tree = viewmodel.catalog_tree(server.list_catalog_records(), [])
+    assert len(tree) == 1 and tree[0]["name"] is None
+    assert len(tree[0]["rows"]) >= 2
+
+
+def test_catalog_tree_stale_member_ids_are_skipped():
+    # A member id whose record vanished renders nothing, never a ghost row.
+    server = FakeServer()
+    (r1,) = _seed_records(server, 1)
+    g = server.create_catalog("holey")
+    server.set_catalog_members(g["internal"]["id"], [r1, "ghost"])
+    tree = viewmodel.catalog_tree(server.list_catalog_records(),
+                                  server.list_catalogs())
+    assert [r["id"] for r in tree[0]["rows"]] == [r1]

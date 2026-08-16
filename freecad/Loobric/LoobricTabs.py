@@ -1179,25 +1179,49 @@ class CatalogTab(_Tab):
     def refresh(self):
         self.tree.clear()
         try:
-            records = self.client.list_catalogs()
+            records = self.client.list_catalog_records()
         except LoobricError as e:
             self.window.refresh_api_log()
             self._notify("✗ %s" % e)
             return
+        # Catalogs group the records into collapsible folders. An older
+        # server (or none created yet) degrades to the flat list.
+        try:
+            catalogs = self.client.list_catalogs()
+        except LoobricError:
+            catalogs = []
         self.window.refresh_api_log()
         self._records_by_id = {
             (r.get("internal") or {}).get("id"): r for r in records}
-        rows = viewmodel.catalog_rows(records)
-        if not rows:
+        groups = viewmodel.catalog_tree(records, catalogs)
+        flat = len(groups) == 1 and groups[0]["name"] is None
+        self.tree.setRootIsDecorated(not flat)
+        if not any(g["rows"] for g in groups):
             QtGui.QTreeWidgetItem(self.tree, ["(no catalog records)", "", "", "", ""])
             self._selection_changed()
             return
-        for r in rows:
-            item = QtGui.QTreeWidgetItem([
+
+        def _record_item(parent, r):
+            item = QtGui.QTreeWidgetItem(parent, [
                 r["name"], r["manufacturer"], r["product_code"],
                 r["geometry"], r["source"]])
             item.setData(0, QtCore.Qt.UserRole, r["id"])
-            self.tree.addTopLevelItem(item)
+            return item
+
+        if flat:
+            for r in groups[0]["rows"]:
+                _record_item(self.tree, r)
+        else:
+            bold = QtGui.QFont()
+            bold.setBold(True)
+            for g in groups:
+                folder = QtGui.QTreeWidgetItem(self.tree, [
+                    "%s (%d)" % (g["name"], len(g["rows"])), "", "", "", ""])
+                folder.setFont(0, bold)
+                folder.setFlags(folder.flags() & ~QtCore.Qt.ItemIsSelectable)
+                for r in g["rows"]:
+                    _record_item(folder, r)
+                folder.setExpanded(True)
         self._selection_changed()
 
     def selected_record(self):
