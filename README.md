@@ -214,7 +214,7 @@ HTTP traffic. Inspecting a record's raw JSON is a right-click action on any row.
   the Loobric schema
 - [DEVELOPMENT.md](./DEVELOPMENT.md) — contributor guide, layout, and tests
 - [loobric-server](https://github.com/loobric/loobric-server) — the Loobric server
-- [loobric-linuxcnc](https://github.com/loobric/loobric-linuxcnc) — LinuxCNC client
+- [loobric-linuxcnc](https://github.com/loobric/loobric-clients/tree/master/clients/linuxcnc) — LinuxCNC client
 - [Issue tracker](https://github.com/loobric/loobric-freecad/issues)
 
 ## License
